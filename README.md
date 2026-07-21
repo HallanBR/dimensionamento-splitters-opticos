@@ -1,6 +1,6 @@
 # Dimensionamento de Splitters Ópticos
 
-Aplicação web em Python para estruturar e analisar rotas com splitters ópticos desbalanceados, com futura integração ao sistema de solicitação de materiais.
+Aplicação web em Python para desenhar e analisar rotas com splitters ópticos desbalanceados, com futura integração ao sistema de solicitação de materiais.
 
 ## Acessar online
 
@@ -11,13 +11,14 @@ A versão hospedada executa o motor Python diretamente no navegador por WebAssem
 ## Primeira versão
 
 - cadastro da origem do sinal;
-- montagem sequencial da rota;
+- montagem visual e sequencial da rota, do DIO às CTOs;
+- interface limpa com a identidade visual do sistema de solicitações;
 - distâncias e fusões por trecho;
 - splitters desbalanceados de 05/95 a 50/50;
 - splitters locais de 1x2 a 1x32;
 - cálculo da potência estimada por ponto;
 - consulta rápida de atenuação;
-- resumo inicial de materiais.
+- resumo inicial de materiais;
 - recomendações explicadas para pontos críticos, potência de origem e alternativas de splitter;
 - motor óptico, recomendações e materiais processados em Python;
 - JavaScript restrito à interface e à ponte com o motor Python;

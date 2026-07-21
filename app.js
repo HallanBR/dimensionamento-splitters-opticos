@@ -5,10 +5,8 @@ const PYODIDE_INDEX_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/
 
 let splitters = [];
 let balancedLosses = {};
-let points = [
-  { name: "CTO 01", distance: 1.2, splices: 4, splitter: "10/90", balanced: "1x8" },
-  { name: "CTO 02", distance: 0.8, splices: 2, splitter: "20/80", balanced: "1x8" },
-];
+let points = [];
+let editingIndex = null;
 let requestTimer = null;
 let analysisRequest = null;
 let quickRequest = null;
@@ -115,39 +113,113 @@ function getSettings() {
 }
 
 function splitterOptions() {
-  return splitters.map((item) => `<option value="${item.ratio}">${item.ratio} · cód. ${item.code}</option>`).join("");
+  return splitters
+    .map((item) => `<option value="${item.ratio}">${item.ratio} · cód. ${item.code}</option>`)
+    .join("");
 }
 
 function balancedOptions() {
   return Object.keys(balancedLosses).map((item) => `<option>${item}</option>`).join("");
 }
 
-function renderPoints() {
-  byId("route-list").innerHTML = points.map((point, index) => `
-    <div class="route-row" data-index="${index}">
-      <label>Nome<input data-field="name" value="${escapeHtml(point.name)}" aria-label="Nome do ponto ${index + 1}"></label>
-      <label>Distância (km)<input data-field="distance" type="number" min="0" step="0.01" value="${point.distance}" aria-label="Distância do ponto ${index + 1}"></label>
-      <label>Quantidade<input data-field="splices" type="number" min="0" step="1" value="${point.splices}" aria-label="Fusões do ponto ${index + 1}"></label>
-      <label>Divisão<select data-field="splitter" aria-label="Splitter do ponto ${index + 1}">${splitterOptions()}</select></label>
-      <label>Splitter cliente<select data-field="balanced" aria-label="Splitter local do ponto ${index + 1}">${balancedOptions()}</select></label>
-      <button class="remove-point" type="button" aria-label="Remover ${escapeHtml(point.name)}">×</button>
-    </div>`).join("");
+function segmentLabel(point) {
+  const distance = Number(point.distance) || 0;
+  const splices = Number(point.splices) || 0;
+  return `${distance.toLocaleString("pt-BR", { maximumFractionDigits: 2 })} km · ${splices} ${splices === 1 ? "fusão" : "fusões"}`;
+}
 
-  document.querySelectorAll(".route-row").forEach((row, index) => {
-    row.querySelector('[data-field="splitter"]').value = points[index].splitter;
-    row.querySelector('[data-field="balanced"]').value = points[index].balanced;
-  });
+function renderPoints() {
+  const list = byId("route-list");
+  if (!points.length) {
+    list.innerHTML = `
+      <div class="empty-route">
+        <strong>A rota começa aqui.</strong>
+        Adicione a primeira caixa conectada ao DIO.
+      </div>`;
+  } else {
+    list.innerHTML = points.map((point, index) => {
+      const isEditing = editingIndex === index;
+      return `
+        <div class="flow-step">
+          <div class="flow-connector" aria-label="Trecho anterior a ${escapeHtml(point.name)}">
+            <span class="flow-line"></span>
+            <button class="segment-chip" type="button" data-action="edit" data-index="${index}" data-segment-index="${index}">
+              ${segmentLabel(point)}
+            </button>
+            <span class="flow-arrow" aria-hidden="true">↓</span>
+          </div>
+          <article class="network-node" data-index="${index}">
+            <header class="node-heading">
+              <div>
+                <span>Ponto ${index + 1}</span>
+                <strong data-node-name>${escapeHtml(point.name)}</strong>
+              </div>
+              <div class="node-actions">
+                <button class="edit-node" type="button" data-action="edit">${isEditing ? "Ocultar" : "Editar"}</button>
+                <button class="remove-node" type="button" data-action="remove">Excluir</button>
+              </div>
+            </header>
+
+            <div class="node-diagram">
+              <div class="splitter-core">
+                <span>Splitter desbalanceado</span>
+                <strong data-output="ratio">${point.splitter}</strong>
+              </div>
+              <div class="node-results">
+                <div class="branch-card local-branch">
+                  <small data-output="local-label">Clientes · ${escapeHtml(point.balanced)}</small>
+                  <strong data-output="local">Calculando...</strong>
+                  <span class="status-chip" data-output="status">—</span>
+                </div>
+                <div class="branch-card pass-branch">
+                  <small>Continuidade da rota</small>
+                  <strong data-output="pass">Calculando...</strong>
+                  <span>Sinal que segue para o próximo ponto</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="node-editor" ${isEditing ? "" : "hidden"}>
+              <div class="editor-grid">
+                <label><span>Nome da caixa</span><input data-field="name" value="${escapeHtml(point.name)}" aria-label="Nome do ponto ${index + 1}"></label>
+                <label><span>Distância (km)</span><input data-field="distance" type="number" min="0" step="0.01" value="${point.distance}" aria-label="Distância do ponto ${index + 1}"></label>
+                <label><span>Fusões</span><input data-field="splices" type="number" min="0" step="1" value="${point.splices}" aria-label="Fusões do ponto ${index + 1}"></label>
+                <label><span>Desbalanceado</span><select data-field="splitter" aria-label="Splitter do ponto ${index + 1}">${splitterOptions()}</select></label>
+                <label><span>Atendimento local</span><select data-field="balanced" aria-label="Splitter local do ponto ${index + 1}">${balancedOptions()}</select></label>
+              </div>
+              <div class="editor-actions">
+                <button class="done-node" type="button" data-action="done">Concluir edição</button>
+              </div>
+            </div>
+          </article>
+        </div>`;
+    }).join("");
+
+    document.querySelectorAll(".network-node").forEach((node, index) => {
+      node.querySelector('[data-field="splitter"]').value = points[index].splitter;
+      node.querySelector('[data-field="balanced"]').value = points[index].balanced;
+    });
+  }
+
+  byId("add-point-label").textContent = points.length ? "Adicionar próximo ponto" : "Adicionar primeiro ponto";
   scheduleAnalysis(0);
 }
 
 function syncPoint(event) {
-  const row = event.target.closest(".route-row");
-  if (!row || !event.target.dataset.field) return;
-  const index = Number(row.dataset.index);
+  const node = event.target.closest(".network-node");
+  if (!node || !event.target.dataset.field) return;
+  const index = Number(node.dataset.index);
   const field = event.target.dataset.field;
   points[index][field] = ["distance", "splices"].includes(field)
     ? Math.max(0, Number(event.target.value) || 0)
     : event.target.value;
+
+  const point = points[index];
+  node.querySelector("[data-node-name]").textContent = point.name || `Ponto ${index + 1}`;
+  node.querySelector('[data-output="ratio"]').textContent = point.splitter;
+  node.querySelector('[data-output="local-label"]').textContent = `Clientes · ${point.balanced}`;
+  const segment = document.querySelector(`[data-segment-index="${index}"]`);
+  if (segment) segment.textContent = segmentLabel(point);
   scheduleAnalysis();
 }
 
@@ -173,50 +245,87 @@ async function requestAnalysis() {
 }
 
 function renderAnalysis(analysis) {
-  renderResults(analysis.results);
-  renderSummary(analysis.summary);
+  patchRouteOutputs(analysis.results);
+  renderSummary(analysis.summary, analysis.results);
   renderRecommendations(analysis.recommendations);
   renderMaterials(analysis.materials);
 }
 
-function renderResults(results) {
-  byId("results-body").innerHTML = results.length ? results.map((result) => {
-    const status = result.effectiveMargin < 0
+function patchRouteOutputs(results) {
+  results.forEach((result, index) => {
+    const node = document.querySelector(`.network-node[data-index="${index}"]`);
+    if (!node) return;
+    const state = result.effectiveMargin < 0
       ? ["Crítico", "critical"]
       : result.effectiveMargin < 2
       ? ["Atenção", "warning"]
       : ["Aprovado", "good"];
-    return `<tr>
-      <td><strong>${escapeHtml(result.name)}</strong></td>
-      <td>${formatDbm(result.input)}</td>
-      <td>${result.splitterData.ratio}</td>
-      <td>${formatDbm(result.local)}</td>
-      <td>${formatDbm(result.pass)}</td>
-      <td>${Number(result.margin).toFixed(2)} dB</td>
-      <td><span class="badge ${status[1]}">${status[0]}</span></td>
-    </tr>`;
-  }).join("") : '<tr><td colspan="7" class="empty-state">Adicione um ponto para iniciar o dimensionamento.</td></tr>';
+    node.dataset.state = state[1];
+    node.querySelector("[data-node-name]").textContent = result.name;
+    node.querySelector('[data-output="ratio"]').textContent = result.splitter;
+    node.querySelector('[data-output="local-label"]').textContent = `Clientes · ${result.balanced}`;
+    node.querySelector('[data-output="local"]').textContent = formatDbm(result.local);
+    node.querySelector('[data-output="pass"]').textContent = formatDbm(result.pass);
+    const status = node.querySelector('[data-output="status"]');
+    status.textContent = state[0];
+    status.className = `status-chip ${state[1]}`;
+    const segment = document.querySelector(`[data-segment-index="${index}"]`);
+    if (segment) segment.textContent = segmentLabel(result);
+  });
 }
 
-function renderSummary(summary) {
-  byId("critical-point").textContent = summary.criticalPoint || "—";
-  byId("critical-value").textContent = summary.criticalValue === null ? "Adicione um ponto" : formatDbm(summary.criticalValue);
-  byId("minimum-margin").textContent = summary.minimumMargin === null ? "—" : `${Number(summary.minimumMargin).toFixed(2)} dB`;
+function renderSummary(summary, results) {
+  const container = byId("route-summary");
+  if (!results.length) {
+    container.dataset.state = "empty";
+    byId("route-status").textContent = "Aguardando pontos";
+    byId("route-status-copy").textContent = "Adicione a primeira caixa para calcular.";
+    byId("critical-point").textContent = "—";
+    byId("critical-value").textContent = "—";
+    byId("minimum-margin").textContent = "—";
+    return;
+  }
+
+  const minimumEffective = Math.min(...results.map((item) => item.effectiveMargin));
+  container.dataset.state = minimumEffective < 0 ? "critical" : minimumEffective < 2 ? "warning" : "good";
   byId("route-status").textContent = summary.status;
   byId("route-status-copy").textContent = summary.statusCopy;
+  byId("critical-point").textContent = summary.criticalPoint || "—";
+  byId("critical-value").textContent = summary.criticalValue === null ? "—" : formatDbm(summary.criticalValue);
+  byId("minimum-margin").textContent = summary.minimumMargin === null
+    ? "—"
+    : `${Number(summary.minimumMargin).toFixed(2)} dB`;
 }
 
 function renderRecommendations(recommendations) {
-  byId("recommendations-list").innerHTML = recommendations.length
-    ? recommendations.map((item) => `<article class="recommendation ${item.level}"><div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.body)}</p></div></article>`).join("")
-    : '<p class="empty-state">Adicione pontos à rota para receber sugestões.</p>';
+  const primary = byId("primary-recommendation");
+  if (!recommendations.length) {
+    primary.hidden = true;
+    byId("recommendations-count").textContent = "0 sugestões";
+    byId("recommendations-list").innerHTML = '<p class="details-empty">Adicione pontos à rota para receber sugestões.</p>';
+    return;
+  }
+
+  const first = recommendations[0];
+  primary.hidden = false;
+  primary.dataset.level = first.level;
+  byId("primary-recommendation-title").textContent = first.title;
+  byId("primary-recommendation-body").textContent = first.body;
+  byId("recommendations-count").textContent = `${recommendations.length} ${recommendations.length === 1 ? "sugestão" : "sugestões"}`;
+  byId("recommendations-list").innerHTML = recommendations
+    .map((item) => `<article class="recommendation ${item.level}"><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.body)}</p></article>`)
+    .join("");
 }
 
 function renderMaterials(materials) {
-  byId("materials-list").innerHTML = materials.map((item) => {
-    const suffix = item.code ? ` · cód. ${item.code}` : " · balanceado";
-    return `<span class="material-chip">${item.quantity}× Splitter ${escapeHtml(item.name)}${suffix}</span>`;
-  }).join("");
+  const total = materials.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  byId("materials-count").textContent = `${total} ${total === 1 ? "item" : "itens"}`;
+  byId("materials-list").innerHTML = materials.length
+    ? materials.map((item) => {
+      const suffix = item.code ? ` · cód. ${item.code}` : "";
+      return `<span class="material-chip">${item.quantity}× Splitter ${escapeHtml(item.name)}${suffix}</span>`;
+    }).join("")
+    : '<p class="details-empty">Os materiais aparecerão conforme você adicionar pontos.</p>';
 }
 
 async function updateQuick() {
@@ -264,23 +373,57 @@ function registerEvents() {
       splitter: "10/90",
       balanced: "1x8",
     });
+    editingIndex = points.length - 1;
     renderPoints();
+    window.setTimeout(() => document.querySelector(`.network-node[data-index="${editingIndex}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
   });
+
   byId("route-list").addEventListener("input", syncPoint);
   byId("route-list").addEventListener("change", syncPoint);
   byId("route-list").addEventListener("click", (event) => {
-    const button = event.target.closest(".remove-point");
-    if (!button) return;
-    points.splice(Number(button.closest(".route-row").dataset.index), 1);
-    renderPoints();
+    const actionTarget = event.target.closest("[data-action]");
+    if (!actionTarget) return;
+    const node = actionTarget.closest(".network-node");
+    const index = node ? Number(node.dataset.index) : Number(actionTarget.dataset.index);
+    const action = actionTarget.dataset.action;
+
+    if (action === "edit") {
+      editingIndex = editingIndex === index ? null : index;
+      renderPoints();
+    }
+    if (action === "done") {
+      editingIndex = null;
+      renderPoints();
+    }
+    if (action === "remove") {
+      points.splice(index, 1);
+      editingIndex = null;
+      renderPoints();
+    }
   });
+
   ["source-power", "fiber-loss", "splice-loss", "minimum-power", "safety-margin"]
     .forEach((id) => byId(id).addEventListener("input", () => scheduleAnalysis()));
   ["quick-power", "quick-splitter"]
     .forEach((id) => byId(id).addEventListener("input", updateQuick));
+
+  byId("open-settings").addEventListener("click", () => byId("settings-dialog").showModal());
+  byId("open-quick").addEventListener("click", () => {
+    byId("quick-dialog").showModal();
+    updateQuick();
+  });
+  byId("open-analysis").addEventListener("click", () => {
+    const details = byId("analysis-details");
+    details.open = true;
+    details.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
   byId("new-project").addEventListener("click", () => {
     points = [];
+    editingIndex = null;
     byId("project-name").value = "Nova rota óptica";
+    byId("source-power").value = "3";
+    byId("analysis-details").open = false;
     renderPoints();
     window.scrollTo({ top: 0, behavior: "smooth" });
   });
