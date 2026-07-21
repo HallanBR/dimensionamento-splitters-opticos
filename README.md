@@ -1,43 +1,26 @@
 # Dimensionamento de Splitters Ópticos
 
-Projeto para planejar um módulo de dimensionamento de splitters desbalanceados, integrado futuramente ao sistema de solicitação de materiais.
+Aplicação web para estruturar e analisar rotas com splitters ópticos desbalanceados, com futura integração ao sistema de solicitação de materiais.
 
-## Objetivo
+## Primeira versão
 
-Permitir que usuários representem cenários reais da rede óptica e obtenham estimativas, comparações e recomendações técnicas de forma guiada, sem depender do cálculo manual completo.
+- cadastro da origem do sinal;
+- montagem sequencial da rota;
+- distâncias e fusões por trecho;
+- splitters desbalanceados de 05/95 a 50/50;
+- splitters locais de 1x2 a 1x32;
+- cálculo da potência estimada por ponto;
+- consulta rápida de atenuação;
+- resumo inicial de materiais;
+- recomendações explicadas para pontos críticos, potência de origem e alternativas de splitter;
+- funcionamento integral no navegador, sem banco de dados e sem autenticação.
 
-## Escopo planejado
+## Executar
 
-- construção visual da rota entre DIO, splitters e pontos de atendimento;
-- uso das distâncias e quantidades de fusões levantadas no OZmap;
-- cálculo das perdas em splitters desbalanceados e balanceados;
-- consulta rápida da atenuação de um único splitter;
-- comparação entre diferentes configurações;
-- identificação de pontos críticos e margens ópticas;
-- sugestões de melhoria, como troca de splitters ou revisão da potência de origem;
-- preservação dos cenários original, sugerido e escolhido pelo usuário;
-- integração futura com a solicitação de materiais;
-- histórico e apoio à aprovação técnica.
+Abra o arquivo `index.html` em um navegador moderno. Esta primeira versão não possui dependências externas nem servidor obrigatório.
 
-## Premissas
+## Testes do motor óptico
 
-- A potência calculada pelo orçamento do OZmap não será considerada como representação obrigatória do cenário real.
-- As perdas dos componentes deverão ser cadastradas conforme os modelos efetivamente utilizados pela empresa.
-- Recomendações do sistema deverão apresentar justificativa, impacto e riscos.
-- Alterações na estrutura montada pelo usuário nunca deverão ser aplicadas automaticamente.
+Com Node.js disponível, execute `node --test tests/calculator.test.js`.
 
-## Splitters inicialmente considerados
-
-| Código | Divisão |
-|---:|:---|
-| 1842 | 05/95 |
-| 1843 | 10/90 |
-| 1844 | 15/85 |
-| 1845 | 20/80 |
-| 1846 | 30/70 |
-| 1847 | 40/60 |
-| 1848 | 50/50 |
-
-## Situação do projeto
-
-Em fase de levantamento e especificação. Nenhum código foi desenvolvido até o momento.
+> Os valores ópticos cadastrados são referências iniciais e devem ser validados conforme os fabricantes e materiais homologados pela empresa antes do uso em produção.
