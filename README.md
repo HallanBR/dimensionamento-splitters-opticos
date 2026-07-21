@@ -1,6 +1,6 @@
 # Dimensionamento de Splitters Ópticos
 
-Aplicação web para estruturar e analisar rotas com splitters ópticos desbalanceados, com futura integração ao sistema de solicitação de materiais.
+Aplicação web em Python para estruturar e analisar rotas com splitters ópticos desbalanceados, com futura integração ao sistema de solicitação de materiais.
 
 ## Primeira versão
 
@@ -11,16 +11,26 @@ Aplicação web para estruturar e analisar rotas com splitters ópticos desbalan
 - splitters locais de 1x2 a 1x32;
 - cálculo da potência estimada por ponto;
 - consulta rápida de atenuação;
-- resumo inicial de materiais;
+- resumo inicial de materiais.
 - recomendações explicadas para pontos críticos, potência de origem e alternativas de splitter;
-- funcionamento integral no navegador, sem banco de dados e sem autenticação.
+- motor óptico, recomendações e materiais processados em Python;
+- JavaScript restrito à interação da página com a API;
+- funcionamento sem banco de dados e sem autenticação.
 
 ## Executar
 
-Abra o arquivo `index.html` em um navegador moderno. Esta primeira versão não possui dependências externas nem servidor obrigatório.
+Requer apenas Python 3.10 ou superior, sem pacotes externos:
+
+```bash
+python server.py
+```
+
+Depois, abra `http://127.0.0.1:8000` no navegador.
 
 ## Testes do motor óptico
 
-Com Node.js disponível, execute `node --test tests/calculator.test.js`.
+```bash
+python -m unittest discover -s tests -v
+```
 
 > Os valores ópticos cadastrados são referências iniciais e devem ser validados conforme os fabricantes e materiais homologados pela empresa antes do uso em produção.

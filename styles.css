@@ -19,6 +19,7 @@ html { scroll-behavior: smooth; }
 body { margin: 0; color: var(--ink); background: var(--paper); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 button, input, select { font: inherit; }
 button { cursor: pointer; }
+.error-banner { position: fixed; z-index: 30; top: 88px; left: 50%; width: min(620px, calc(100% - 32px)); padding: 13px 17px; color: #7f2d27; background: var(--red-soft); border: 1px solid #efb8b1; border-radius: 11px; box-shadow: var(--shadow); font-size: 13px; transform: translateX(-50%); }
 
 .topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 28px; min-height: 76px; padding: 12px clamp(20px, 5vw, 72px); background: rgba(255,255,255,.94); border-bottom: 1px solid var(--line); backdrop-filter: blur(14px); }
 .brand { display: flex; align-items: center; gap: 12px; color: inherit; text-decoration: none; }
