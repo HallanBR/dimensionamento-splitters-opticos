@@ -63,6 +63,43 @@ class OpticalCalculatorTests(unittest.TestCase):
         self.assertEqual(analysis["materials"][0]["code"], 1843)
         self.assertEqual(len(analysis["results"]), 1)
 
+    def test_ultima_caixa_pode_ter_apenas_splitter_local(self) -> None:
+        points = [
+            {"name": "CTO final", "distance": 1, "splices": 2, "splitter": "", "balanced": "1x8"}
+        ]
+        analysis = analyze_route(points, SETTINGS)
+        result = analysis["results"][0]
+        self.assertAlmostEqual(result["input"], 2.45)
+        self.assertAlmostEqual(result["local"], -8.05)
+        self.assertIsNone(result["pass"])
+        self.assertIsNone(result["splitterData"])
+        self.assertEqual(analysis["materials"], [
+            {"type": "balanceado", "name": "1x8", "quantity": 1, "code": None}
+        ])
+
+    def test_caixa_sem_desbalanceado_deve_ser_a_ultima(self) -> None:
+        points = [
+            {"name": "CTO 01", "distance": 0, "splices": 0, "splitter": "", "balanced": "1x8"},
+            {"name": "CTO 02", "distance": 0, "splices": 0, "splitter": "10/90", "balanced": "1x8"},
+        ]
+        with self.assertRaises(OpticalInputError):
+            calculate_route(points, SETTINGS)
+
+    def test_saida_passante_alimenta_caixa_final_sem_desbalanceado(self) -> None:
+        points = [
+            {"name": "CTO 01", "distance": 1, "splices": 2, "splitter": "10/90", "balanced": "1x8"},
+            {"name": "CTO final", "distance": 2, "splices": 1, "splitter": "", "balanced": "1x8"},
+        ]
+        analysis = analyze_route(points, SETTINGS)
+        results = analysis["results"]
+        self.assertAlmostEqual(results[0]["pass"], 1.45)
+        self.assertAlmostEqual(results[1]["input"], 0.65)
+        self.assertAlmostEqual(results[1]["local"], -9.85)
+        self.assertEqual(analysis["materials"], [
+            {"type": "desbalanceado", "name": "10/90", "quantity": 1, "code": 1843},
+            {"type": "balanceado", "name": "1x8", "quantity": 2, "code": None},
+        ])
+
     def test_rejeita_splitter_desconhecido(self) -> None:
         with self.assertRaises(OpticalInputError):
             calculate_quick(-8, "12/88")
