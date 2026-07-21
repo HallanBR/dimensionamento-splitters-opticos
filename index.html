@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Dimensionamento assistido de splitters ópticos desbalanceados."
+    />
+    <title>Dimensionamento de Splitters</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#inicio" aria-label="Ir para o início">
+        <span class="brand-mark" aria-hidden="true">◇</span>
+        <span>
+          <strong>Óptica Planner</strong>
+          <small>Dimensionamento assistido</small>
+        </span>
+      </a>
+      <nav aria-label="Navegação principal">
+        <a class="active" href="#calculadora">Dimensionamento</a>
+        <a href="#consulta">Consulta rápida</a>
+        <a href="#materiais">Materiais</a>
+      </nav>
+      <button class="ghost-button" type="button" id="new-project">Novo projeto</button>
+    </header>
+
+    <main id="inicio">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Planejamento de rede óptica</p>
+          <h1>Transforme uma rota real em uma decisão técnica clara.</h1>
+          <p class="hero-copy">
+            Monte a sequência entre o DIO e as caixas, compare splitters e acompanhe a
+            potência projetada em cada ponto.
+          </p>
+        </div>
+        <div class="hero-status" aria-label="Status do projeto">
+          <span class="status-dot"></span>
+          <span><strong>Versão inicial</strong><small>Cálculo manual assistido</small></span>
+        </div>
+      </section>
+
+      <section class="workspace" id="calculadora">
+        <aside class="steps" aria-label="Etapas do dimensionamento">
+          <p class="eyebrow">Fluxo do projeto</p>
+          <ol>
+            <li class="active"><span>1</span><div><strong>Origem do sinal</strong><small>Dados do DIO</small></div></li>
+            <li><span>2</span><div><strong>Estrutura da rota</strong><small>Caixas e splitters</small></div></li>
+            <li><span>3</span><div><strong>Análise</strong><small>Potências e margens</small></div></li>
+            <li><span>4</span><div><strong>Materiais</strong><small>Lista para solicitação</small></div></li>
+          </ol>
+          <div class="info-card">
+            <strong>Sobre os dados do OZmap</strong>
+            <p>Use a metragem e as fusões do trajeto. A potência exibida pelo OZmap não é importada.</p>
+          </div>
+        </aside>
+
+        <div class="content-column">
+          <section class="panel origin-panel">
+            <div class="panel-heading">
+              <div><p class="eyebrow">Etapa 1</p><h2>Origem do sinal</h2></div>
+              <span class="pill">DIO</span>
+            </div>
+            <div class="form-grid">
+              <label>Nome do projeto<input id="project-name" value="Nova rota óptica" /></label>
+              <label>Potência de saída (dBm)<input id="source-power" type="number" value="3" step="0.1" /></label>
+              <label>Atenuação da fibra (dB/km)<input id="fiber-loss" type="number" value="0.35" step="0.01" min="0" /></label>
+              <label>Perda por fusão (dB)<input id="splice-loss" type="number" value="0.10" step="0.01" min="0" /></label>
+              <label>Limite mínimo (dBm)<input id="minimum-power" type="number" value="-27" step="0.1" /></label>
+              <label>Margem de segurança (dB)<input id="safety-margin" type="number" value="3" step="0.1" min="0" /></label>
+            </div>
+          </section>
+
+          <section class="panel route-panel">
+            <div class="panel-heading">
+              <div><p class="eyebrow">Etapa 2</p><h2>Estrutura da rota</h2></div>
+              <button class="primary-button" type="button" id="add-point">+ Adicionar ponto</button>
+            </div>
+            <div class="route-head" aria-hidden="true">
+              <span>Ponto</span><span>Trecho</span><span>Fusões</span><span>Desbalanceado</span><span>Local</span><span></span>
+            </div>
+            <div id="route-list" class="route-list"></div>
+          </section>
+
+          <section class="summary-grid" id="analysis">
+            <article class="metric-card"><span>Ponto mais crítico</span><strong id="critical-point">—</strong><small id="critical-value">Adicione um ponto</small></article>
+            <article class="metric-card"><span>Menor margem</span><strong id="minimum-margin">—</strong><small>considerando o limite configurado</small></article>
+            <article class="metric-card accent"><span>Situação da rota</span><strong id="route-status">Não calculada</strong><small id="route-status-copy">Preencha a estrutura</small></article>
+          </section>
+
+          <section class="panel results-panel">
+            <div class="panel-heading"><div><p class="eyebrow">Etapa 3</p><h2>Resultado ponto a ponto</h2></div></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Ponto</th><th>Entrada</th><th>Splitter</th><th>Cliente</th><th>Continuidade</th><th>Margem</th><th>Status</th></tr></thead>
+                <tbody id="results-body"><tr><td colspan="7" class="empty-state">Adicione um ponto para iniciar o dimensionamento.</td></tr></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel recommendations-panel" id="recommendations">
+            <div class="panel-heading">
+              <div><p class="eyebrow">Assistente técnico</p><h2>Pontos de melhoria</h2></div>
+              <span class="pill">Sem alterações automáticas</span>
+            </div>
+            <div id="recommendations-list" class="recommendations-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="quick-section" id="consulta">
+        <div><p class="eyebrow">Sem montar uma rota</p><h2>Consulta rápida de atenuação</h2><p>Informe apenas a potência disponível e veja o sinal estimado nas duas saídas.</p></div>
+        <div class="quick-card">
+          <label>Potência de entrada (dBm)<input id="quick-power" type="number" value="-8" step="0.1" /></label>
+          <label>Splitter<select id="quick-splitter"></select></label>
+          <div class="quick-result"><span>Saída local<strong id="quick-local">—</strong></span><span>Saída passante<strong id="quick-pass">—</strong></span></div>
+        </div>
+      </section>
+
+      <section class="materials-section" id="materiais">
+        <p class="eyebrow">Próxima integração</p>
+        <h2>Materiais do cenário</h2>
+        <p id="materials-copy">Os splitters escolhidos aparecerão aqui para futura integração com a solicitação.</p>
+        <div id="materials-list" class="materials-list"></div>
+      </section>
+    </main>
+
+    <footer>Protótipo inicial · Valores de perda devem ser validados com os fabricantes homologados.</footer>
+    <script src="calculator.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
