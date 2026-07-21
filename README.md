@@ -2,6 +2,12 @@
 
 Aplicação web em Python para estruturar e analisar rotas com splitters ópticos desbalanceados, com futura integração ao sistema de solicitação de materiais.
 
+## Acessar online
+
+**[Abrir o Óptica Planner](https://hallanbr.github.io/dimensionamento-splitters-opticos/)**
+
+A versão hospedada executa o motor Python diretamente no navegador por WebAssembly. Na primeira abertura, aguarde alguns segundos para o ambiente Python ser carregado.
+
 ## Primeira versão
 
 - cadastro da origem do sinal;
@@ -14,7 +20,7 @@ Aplicação web em Python para estruturar e analisar rotas com splitters óptico
 - resumo inicial de materiais.
 - recomendações explicadas para pontos críticos, potência de origem e alternativas de splitter;
 - motor óptico, recomendações e materiais processados em Python;
-- JavaScript restrito à interação da página com a API;
+- JavaScript restrito à interface e à ponte com o motor Python;
 - funcionamento sem banco de dados e sem autenticação.
 
 ## Executar
@@ -25,7 +31,7 @@ Requer apenas Python 3.10 ou superior, sem pacotes externos:
 python server.py
 ```
 
-Depois, abra `http://127.0.0.1:8000` no navegador.
+Depois, abra `http://127.0.0.1:8000` no navegador. O acesso local também precisa de internet na primeira execução para carregar o ambiente Python usado pelo navegador.
 
 ## Testes do motor óptico
 

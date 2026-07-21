@@ -20,6 +20,7 @@ STATIC_FILES = {
     "/index.html": PROJECT_ROOT / "index.html",
     "/styles.css": PROJECT_ROOT / "styles.css",
     "/app.js": PROJECT_ROOT / "app.js",
+    "/optical.py": PROJECT_ROOT / "optical.py",
 }
 MAX_BODY_SIZE = 1_000_000
 

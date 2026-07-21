@@ -1,5 +1,8 @@
 "use strict";
 
+const PYODIDE_VERSION = "314.0.2";
+const PYODIDE_INDEX_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
+
 let splitters = [];
 let balancedLosses = {};
 let points = [
@@ -9,20 +12,95 @@ let points = [
 let requestTimer = null;
 let analysisRequest = null;
 let quickRequest = null;
+let pythonReadyPromise = null;
+let pythonCallQueue = Promise.resolve();
 
 const byId = (id) => document.getElementById(id);
 const numberValue = (id) => Number(byId(id).value) || 0;
 const formatDbm = (value) => `${Number(value).toFixed(2)} dBm`;
 
+function setRuntimeStatus(state, title, copy) {
+  const status = byId("runtime-status");
+  if (!status) return;
+  status.dataset.state = state;
+  byId("runtime-title").textContent = title;
+  byId("runtime-copy").textContent = copy;
+}
+
+async function ensurePython() {
+  if (!pythonReadyPromise) {
+    pythonReadyPromise = (async () => {
+      setRuntimeStatus("loading", "Iniciando Python", "Carregando o motor óptico...");
+      if (typeof loadPyodide !== "function") {
+        throw new Error("O motor Python não pôde ser carregado. Confira sua conexão com a internet.");
+      }
+
+      const runtime = await loadPyodide({ indexURL: PYODIDE_INDEX_URL });
+      const sourceResponse = await fetch(new URL("optical.py", document.baseURI));
+      if (!sourceResponse.ok) {
+        throw new Error("O arquivo do motor óptico não foi encontrado.");
+      }
+      runtime.FS.writeFile("optical.py", await sourceResponse.text());
+      await runtime.runPythonAsync(`
+import json
+from optical import OpticalInputError, analyze_route, calculate_quick, catalog
+
+def _handle_browser_request(raw_request):
+    try:
+        request = json.loads(raw_request)
+        action = request.get("action")
+        payload = request.get("payload") or {}
+        if action == "catalog":
+            result = catalog()
+        elif action == "calculate":
+            result = analyze_route(payload.get("points", []), payload.get("settings", {}))
+        elif action == "quick":
+            result = calculate_quick(payload.get("inputPower"), str(payload.get("splitter", "")))
+        else:
+            raise OpticalInputError("Operação não reconhecida.")
+        response = {"ok": True, "data": result}
+    except (OpticalInputError, TypeError, ValueError) as exc:
+        response = {"ok": False, "error": str(exc)}
+    return json.dumps(response, ensure_ascii=False)
+`);
+      setRuntimeStatus("ready", "Python ativo", "Cálculos executados no navegador");
+      return runtime;
+    })().catch((error) => {
+      setRuntimeStatus("error", "Falha ao iniciar", "Atualize a página para tentar novamente");
+      throw error;
+    });
+  }
+  return pythonReadyPromise;
+}
+
+async function callPython(action, payload = {}) {
+  const execute = async () => {
+    const runtime = await ensurePython();
+    runtime.globals.set("_browser_request_json", JSON.stringify({ action, payload }));
+    try {
+      const serialized = runtime.runPython("_handle_browser_request(_browser_request_json)");
+      const response = JSON.parse(serialized);
+      if (!response.ok) throw new Error(response.error || "Não foi possível concluir a operação.");
+      return response.data;
+    } finally {
+      runtime.globals.delete("_browser_request_json");
+    }
+  };
+  const queued = pythonCallQueue.then(execute, execute);
+  pythonCallQueue = queued.catch(() => undefined);
+  return queued;
+}
+
 async function api(path, payload, signal) {
-  const response = await fetch(path, {
-    method: payload ? "POST" : "GET",
-    headers: payload ? { "Content-Type": "application/json" } : undefined,
-    body: payload ? JSON.stringify(payload) : undefined,
-    signal,
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Não foi possível concluir a operação.");
+  if (signal?.aborted) throw new DOMException("Operação cancelada.", "AbortError");
+  const action = {
+    "/api/catalog": "catalog",
+    "/api/calculate": "calculate",
+    "/api/quick": "quick",
+  }[path];
+  if (!action) throw new Error("Operação não reconhecida.");
+  const data = await callPython(action, payload);
+  if (signal?.aborted) throw new DOMException("Operação cancelada.", "AbortError");
   return data;
 }
 

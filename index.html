@@ -38,9 +38,9 @@
             potência projetada em cada ponto.
           </p>
         </div>
-        <div class="hero-status" aria-label="Status do projeto">
+        <div class="hero-status" id="runtime-status" data-state="loading" aria-live="polite">
           <span class="status-dot"></span>
-          <span><strong>Versão inicial</strong><small>Cálculo manual assistido</small></span>
+          <span><strong id="runtime-title">Iniciando Python</strong><small id="runtime-copy">Carregando o motor óptico...</small></span>
         </div>
       </section>
 
@@ -130,6 +130,7 @@
     </main>
 
     <footer>Protótipo inicial · Valores de perda devem ser validados com os fabricantes homologados.</footer>
+    <script src="https://cdn.jsdelivr.net/pyodide/v314.0.2/full/pyodide.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
