@@ -102,7 +102,11 @@ def calculate_route(
         name = str(point.get("name") or f"Ponto {index + 1}").strip()
         ratio = str(point.get("splitter") or "")
         balanced = str(point.get("balanced") or "Sem splitter")
-        splitter = get_splitter(ratio)
+        if not ratio and index < len(points) - 1:
+            raise OpticalInputError(
+                f"Somente a última caixa pode ficar sem splitter desbalanceado. Revise {name}."
+            )
+        splitter = get_splitter(ratio) if ratio else None
         if balanced not in BALANCED_LOSSES:
             raise OpticalInputError(f"Splitter local inválido em {name}.")
 
@@ -114,8 +118,9 @@ def calculate_route(
 
         segment_loss = distance * settings["fiberLoss"] + splices * settings["spliceLoss"]
         input_power = current_power - segment_loss
-        local_power = input_power - splitter.local_loss - BALANCED_LOSSES[balanced]
-        pass_power = input_power - splitter.pass_loss
+        local_loss = splitter.local_loss if splitter else 0.0
+        local_power = input_power - local_loss - BALANCED_LOSSES[balanced]
+        pass_power = input_power - splitter.pass_loss if splitter else None
         margin = local_power - settings["minimumPower"]
         effective_margin = margin - settings["safetyMargin"]
 
@@ -126,7 +131,7 @@ def calculate_route(
                 "splices": splices,
                 "splitter": ratio,
                 "balanced": balanced,
-                "splitterData": splitter.as_dict(),
+                "splitterData": splitter.as_dict() if splitter else None,
                 "segmentLoss": segment_loss,
                 "input": input_power,
                 "local": local_power,
@@ -135,7 +140,8 @@ def calculate_route(
                 "effectiveMargin": effective_margin,
             }
         )
-        current_power = pass_power
+        if pass_power is not None:
+            current_power = pass_power
 
     return results
 
@@ -156,6 +162,8 @@ def find_best_single_change(
     best: dict[str, Any] | None = None
 
     for point_index, point in enumerate(points):
+        if not point.get("splitter"):
+            continue
         for candidate in SPLITTERS:
             if candidate.ratio == point.get("splitter"):
                 continue
@@ -278,7 +286,7 @@ def build_recommendations(
                 "level": "informative",
                 "title": f"Conferir o trecho anterior a {long_segment['name']}",
                 "body": (
-                    f"Distância e fusões somam {long_segment['segmentLoss']:.2f} dB de perda antes do splitter. "
+                    f"Distância e fusões somam {long_segment['segmentLoss']:.2f} dB de perda antes do ponto. "
                     "Vale validar os dados levantados no OZmap."
                 ),
             }
@@ -290,7 +298,8 @@ def build_materials(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
     counts: dict[tuple[str, str], int] = {}
     for point in points:
         ratio = str(point.get("splitter") or "")
-        counts[("desbalanceado", ratio)] = counts.get(("desbalanceado", ratio), 0) + 1
+        if ratio:
+            counts[("desbalanceado", ratio)] = counts.get(("desbalanceado", ratio), 0) + 1
         balanced = str(point.get("balanced") or "Sem splitter")
         if balanced != "Sem splitter":
             counts[("balanceado", balanced)] = counts.get(("balanceado", balanced), 0) + 1

@@ -15,7 +15,8 @@ let pythonCallQueue = Promise.resolve();
 
 const byId = (id) => document.getElementById(id);
 const numberValue = (id) => Number(byId(id).value) || 0;
-const formatDbm = (value) => `${Number(value).toFixed(2)} dBm`;
+const formatDbm = (value) => value === null || value === undefined ? "—" : `${Number(value).toFixed(2)} dBm`;
+const splitterLabel = (ratio) => ratio || "Sem desbalanceado";
 
 function setRuntimeStatus(state, title, copy) {
   const status = byId("runtime-status");
@@ -112,9 +113,10 @@ function getSettings() {
   };
 }
 
-function splitterOptions() {
-  return splitters
-    .map((item) => `<option value="${item.ratio}">${item.ratio} · cód. ${item.code}</option>`)
+function splitterOptions(includeEmpty = false) {
+  const emptyOption = includeEmpty ? '<option value="">Sem desbalanceado</option>' : "";
+  return emptyOption + splitters
+    .map((item) => `<option value="${item.ratio}">${item.ratio}</option>`)
     .join("");
 }
 
@@ -148,7 +150,7 @@ function renderPoints() {
             </button>
             <span class="flow-arrow" aria-hidden="true">↓</span>
           </div>
-          <article class="network-node" data-index="${index}">
+          <article class="network-node${point.splitter ? "" : " terminal-node"}" data-index="${index}">
             <header class="node-heading">
               <div>
                 <span>Ponto ${index + 1}</span>
@@ -162,16 +164,16 @@ function renderPoints() {
 
             <div class="node-diagram">
               <div class="splitter-core">
-                <span>Splitter desbalanceado</span>
-                <strong data-output="ratio">${point.splitter}</strong>
+                <span data-output="splitter-label">${point.splitter ? "Splitter desbalanceado" : "Final da rota"}</span>
+                <strong data-output="ratio">${splitterLabel(point.splitter)}</strong>
               </div>
-              <div class="node-results">
+              <div class="node-results${point.splitter ? "" : " terminal-results"}">
                 <div class="branch-card local-branch">
                   <small data-output="local-label">Clientes · ${escapeHtml(point.balanced)}</small>
                   <strong data-output="local">Calculando...</strong>
                   <span class="status-chip" data-output="status">—</span>
                 </div>
-                <div class="branch-card pass-branch">
+                <div class="branch-card pass-branch" ${point.splitter ? "" : "hidden"}>
                   <small>Continuidade da rota</small>
                   <strong data-output="pass">Calculando...</strong>
                   <span>Sinal que segue para o próximo ponto</span>
@@ -184,7 +186,7 @@ function renderPoints() {
                 <label><span>Nome da caixa</span><input data-field="name" value="${escapeHtml(point.name)}" aria-label="Nome do ponto ${index + 1}"></label>
                 <label><span>Distância (km)</span><input data-field="distance" type="number" min="0" step="0.01" value="${point.distance}" aria-label="Distância do ponto ${index + 1}"></label>
                 <label><span>Fusões</span><input data-field="splices" type="number" min="0" step="1" value="${point.splices}" aria-label="Fusões do ponto ${index + 1}"></label>
-                <label><span>Desbalanceado</span><select data-field="splitter" aria-label="Splitter do ponto ${index + 1}">${splitterOptions()}</select></label>
+                <label><span>Desbalanceado</span><select data-field="splitter" aria-label="Splitter do ponto ${index + 1}">${splitterOptions(index === points.length - 1)}</select></label>
                 <label><span>Atendimento local</span><select data-field="balanced" aria-label="Splitter local do ponto ${index + 1}">${balancedOptions()}</select></label>
               </div>
               <div class="editor-actions">
@@ -201,7 +203,15 @@ function renderPoints() {
     });
   }
 
-  byId("add-point-label").textContent = points.length ? "Adicionar próximo ponto" : "Adicionar primeiro ponto";
+  const terminalRoute = points.length > 0 && !points[points.length - 1].splitter;
+  const addButton = byId("add-point");
+  addButton.disabled = terminalRoute;
+  addButton.title = terminalRoute ? "Escolha um desbalanceado na última caixa para continuar a rota." : "";
+  byId("add-point-label").textContent = terminalRoute
+    ? "Rota encerrada nesta caixa"
+    : points.length
+    ? "Adicionar próximo ponto"
+    : "Adicionar primeiro ponto";
   scheduleAnalysis(0);
 }
 
@@ -210,13 +220,24 @@ function syncPoint(event) {
   if (!node || !event.target.dataset.field) return;
   const index = Number(node.dataset.index);
   const field = event.target.dataset.field;
-  points[index][field] = ["distance", "splices"].includes(field)
+  const newValue = ["distance", "splices"].includes(field)
     ? Math.max(0, Number(event.target.value) || 0)
     : event.target.value;
+  if (field === "splitter" && !newValue && index < points.length - 1) {
+    event.target.value = points[index].splitter;
+    showError("Somente a última caixa da rota pode ficar sem splitter desbalanceado.");
+    return;
+  }
+  points[index][field] = newValue;
+
+  if (field === "splitter") {
+    renderPoints();
+    return;
+  }
 
   const point = points[index];
   node.querySelector("[data-node-name]").textContent = point.name || `Ponto ${index + 1}`;
-  node.querySelector('[data-output="ratio"]').textContent = point.splitter;
+  node.querySelector('[data-output="ratio"]').textContent = splitterLabel(point.splitter);
   node.querySelector('[data-output="local-label"]').textContent = `Clientes · ${point.balanced}`;
   const segment = document.querySelector(`[data-segment-index="${index}"]`);
   if (segment) segment.textContent = segmentLabel(point);
@@ -261,10 +282,17 @@ function patchRouteOutputs(results) {
       ? ["Atenção", "warning"]
       : ["Aprovado", "good"];
     node.dataset.state = state[1];
+    const terminal = !result.splitter;
+    node.classList.toggle("terminal-node", terminal);
     node.querySelector("[data-node-name]").textContent = result.name;
-    node.querySelector('[data-output="ratio"]').textContent = result.splitter;
+    node.querySelector('[data-output="splitter-label"]').textContent = terminal ? "Final da rota" : "Splitter desbalanceado";
+    node.querySelector('[data-output="ratio"]').textContent = splitterLabel(result.splitter);
     node.querySelector('[data-output="local-label"]').textContent = `Clientes · ${result.balanced}`;
     node.querySelector('[data-output="local"]').textContent = formatDbm(result.local);
+    const resultGrid = node.querySelector(".node-results");
+    const passBranch = node.querySelector(".pass-branch");
+    resultGrid.classList.toggle("terminal-results", terminal);
+    passBranch.hidden = terminal;
     node.querySelector('[data-output="pass"]').textContent = formatDbm(result.pass);
     const status = node.querySelector('[data-output="status"]');
     status.textContent = state[0];
@@ -366,6 +394,10 @@ function escapeHtml(value) {
 
 function registerEvents() {
   byId("add-point").addEventListener("click", () => {
+    if (points.length && !points[points.length - 1].splitter) {
+      showError("A rota termina na última caixa. Para adicionar outro ponto, selecione nela um splitter desbalanceado.");
+      return;
+    }
     points.push({
       name: `CTO ${String(points.length + 1).padStart(2, "0")}`,
       distance: 0,

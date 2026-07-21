@@ -16,6 +16,7 @@ A versão hospedada executa o motor Python diretamente no navegador por WebAssem
 - distâncias e fusões por trecho;
 - splitters desbalanceados de 05/95 a 50/50;
 - splitters locais de 1x2 a 1x32;
+- última caixa apenas com splitter local, sem desbalanceado;
 - cálculo da potência estimada por ponto;
 - consulta rápida de atenuação;
 - resumo inicial de materiais;
