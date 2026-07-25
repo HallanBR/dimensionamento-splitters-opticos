@@ -41,4 +41,3 @@ Depois, abra `http://127.0.0.1:8000` no navegador. O acesso local também precis
 python -m unittest discover -s tests -v
 ```
 
-> Os valores ópticos cadastrados são referências iniciais e devem ser validados conforme os fabricantes e materiais homologados pela empresa antes do uso em produção.
