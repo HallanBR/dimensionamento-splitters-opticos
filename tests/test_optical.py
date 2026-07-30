@@ -100,6 +100,21 @@ class OpticalCalculatorTests(unittest.TestCase):
             {"type": "balanceado", "name": "1x8", "quantity": 2, "code": None},
         ])
 
+    def test_soma_capacidade_dos_splitters_de_clientes(self) -> None:
+        points = [
+            {"name": "CTO 01", "distance": 0, "splices": 0, "splitter": "10/90", "balanced": "1x8"},
+            {"name": "CTO final", "distance": 0, "splices": 0, "splitter": "", "balanced": "1x16"},
+        ]
+        analysis = analyze_route(points, SETTINGS)
+        self.assertEqual(analysis["summary"]["totalClients"], 24)
+
+    def test_ignora_caixa_sem_splitter_de_clientes_na_capacidade(self) -> None:
+        points = [
+            {"name": "CTO", "distance": 0, "splices": 0, "splitter": "10/90", "balanced": "Sem splitter"}
+        ]
+        analysis = analyze_route(points, SETTINGS)
+        self.assertEqual(analysis["summary"]["totalClients"], 0)
+
     def test_rejeita_splitter_desconhecido(self) -> None:
         with self.assertRaises(OpticalInputError):
             calculate_quick(-8, "12/88")
