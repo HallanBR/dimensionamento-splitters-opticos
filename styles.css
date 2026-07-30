@@ -126,7 +126,7 @@ input:focus, select:focus { border-color: #a40d31; box-shadow: 0 0 0 3px rgba(16
 .add-node-button > span:first-child { display: grid; width: 22px; height: 22px; place-items: center; color: #fff; background: var(--red); border-radius: 50%; font-size: 1rem; line-height: 1; }
 .add-node-button:hover { background: var(--red-soft); }
 
-.route-summary { display: grid; grid-template-columns: minmax(0, 1.7fr) repeat(2, minmax(130px, .65fr)); gap: 1rem; align-items: center; padding: 1rem 1.2rem; }
+.route-summary { display: grid; grid-template-columns: minmax(0, 1.7fr) repeat(3, minmax(120px, .65fr)); gap: 1rem; align-items: center; padding: 1rem 1.2rem; }
 .summary-state { display: flex; gap: .75rem; align-items: center; }
 .summary-dot { width: 9px; height: 9px; flex: 0 0 auto; background: #9aa5af; border-radius: 50%; box-shadow: 0 0 0 4px #edf0f2; }
 .route-summary[data-state="good"] .summary-dot { background: var(--green); box-shadow: 0 0 0 4px var(--green-soft); }
@@ -138,6 +138,7 @@ input:focus, select:focus { border-color: #a40d31; box-shadow: 0 0 0 3px rgba(16
 .summary-state span, .summary-metric span { color: var(--muted); font-size: .7rem; }
 .summary-metric { padding-left: 1rem; border-left: 1px solid #e4e8eb; }
 .summary-metric strong { margin: .12rem 0; font-size: .86rem; }
+.capacity-metric strong { color: var(--red); font-size: 1.05rem; }
 
 .primary-recommendation { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .85rem; align-items: center; padding: .95rem 1.1rem; border-color: #e4c4a0; background: #fffaf0; }
 .recommendation-icon { display: grid; width: 28px; height: 28px; place-items: center; color: #fff; background: var(--amber); border-radius: 50%; font-family: Georgia, serif; font-weight: 800; }
@@ -196,7 +197,7 @@ footer { padding: 1.5rem 1rem 2.2rem; color: var(--muted); text-align: center; f
   .source-node { grid-template-columns: auto minmax(0, 1fr); }
   .power-field { grid-column: 1 / -1; grid-template-columns: auto 160px; justify-content: end; }
   .editor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .route-summary { grid-template-columns: 1fr 1fr; }
+  .route-summary { grid-template-columns: repeat(3, 1fr); }
   .summary-state { grid-column: 1 / -1; }
   .summary-metric:first-of-type { padding-left: 0; border-left: 0; }
   .analysis-content { grid-template-columns: 1fr; }

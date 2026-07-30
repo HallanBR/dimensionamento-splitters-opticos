@@ -311,6 +311,7 @@ function renderSummary(summary, results) {
     byId("critical-point").textContent = "—";
     byId("critical-value").textContent = "—";
     byId("minimum-margin").textContent = "—";
+    byId("total-clients").textContent = "0";
     return;
   }
 
@@ -323,6 +324,7 @@ function renderSummary(summary, results) {
   byId("minimum-margin").textContent = summary.minimumMargin === null
     ? "—"
     : `${Number(summary.minimumMargin).toFixed(2)} dB`;
+  byId("total-clients").textContent = String(summary.totalClients || 0);
 }
 
 function renderRecommendations(recommendations) {

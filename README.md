@@ -17,6 +17,7 @@ A versão hospedada executa o motor Python diretamente no navegador por WebAssem
 - splitters desbalanceados de 05/95 a 50/50;
 - splitters locais de 1x2 a 1x32;
 - última caixa apenas com splitter local, sem desbalanceado;
+- soma automática da capacidade total dos splitters de clientes;
 - cálculo da potência estimada por ponto;
 - consulta rápida de atenuação;
 - resumo inicial de materiais;
@@ -41,3 +42,4 @@ Depois, abra `http://127.0.0.1:8000` no navegador. O acesso local também precis
 python -m unittest discover -s tests -v
 ```
 
+> Os valores ópticos cadastrados são referências iniciais e devem ser validados conforme os fabricantes e materiais homologados pela empresa antes do uso em produção.

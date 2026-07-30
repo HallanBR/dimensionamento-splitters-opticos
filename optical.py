@@ -46,6 +46,15 @@ BALANCED_LOSSES = {
     "1x32": 17.1,
 }
 
+BALANCED_CAPACITIES = {
+    "Sem splitter": 0,
+    "1x2": 2,
+    "1x4": 4,
+    "1x8": 8,
+    "1x16": 16,
+    "1x32": 32,
+}
+
 DEFAULT_SETTINGS = {
     "sourcePower": 3.0,
     "fiberLoss": 0.35,
@@ -323,6 +332,10 @@ def analyze_route(points: list[dict[str, Any]], raw_settings: dict[str, Any] | N
         raise OpticalInputError("A estrutura da rota deve ser uma lista de pontos.")
     settings = normalize_settings(raw_settings)
     results = calculate_route(points, settings)
+    total_clients = sum(
+        BALANCED_CAPACITIES.get(str(point.get("balanced") or "Sem splitter"), 0)
+        for point in points
+    )
 
     if results:
         critical = min(results, key=lambda item: item["margin"])
@@ -342,6 +355,7 @@ def analyze_route(points: list[dict[str, Any]], raw_settings: dict[str, Any] | N
             "minimumMargin": critical["margin"],
             "status": status,
             "statusCopy": status_copy,
+            "totalClients": total_clients,
         }
     else:
         summary = {
@@ -350,6 +364,7 @@ def analyze_route(points: list[dict[str, Any]], raw_settings: dict[str, Any] | N
             "minimumMargin": None,
             "status": "Não calculada",
             "statusCopy": "Preencha a estrutura",
+            "totalClients": 0,
         }
 
     return {
