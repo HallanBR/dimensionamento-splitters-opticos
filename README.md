@@ -1,6 +1,6 @@
 # Dimensionamento de Splitters Ópticos
 
-Aplicação web em Python para desenhar e analisar rotas com splitters ópticos desbalanceados, com futura integração ao sistema de solicitação de materiais.
+Aplicação web em Python para desenhar e analisar rotas com splitters ópticos desbalanceados.
 
 ## Acessar online
 
