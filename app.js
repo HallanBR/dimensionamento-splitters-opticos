@@ -2,9 +2,26 @@
 
 const PYODIDE_VERSION = "314.0.2";
 const PYODIDE_INDEX_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
+const SCENARIO_VERSION = 1;
+const SCENARIO_HASH_KEY = "cenario";
+const MAX_SHARED_POINTS = 100;
+const SETTING_FIELDS = {
+  sourcePower: "source-power",
+  fiberLoss: "fiber-loss",
+  spliceLoss: "splice-loss",
+  minimumPower: "minimum-power",
+  safetyMargin: "safety-margin",
+};
 
 let splitters = [];
 let balancedLosses = {};
+let defaultSettings = {
+  sourcePower: 3,
+  fiberLoss: 0.35,
+  spliceLoss: 0.10,
+  minimumPower: -27,
+  safetyMargin: 3,
+};
 let points = [];
 let editingIndex = null;
 let requestTimer = null;
@@ -111,6 +128,138 @@ function getSettings() {
     minimumPower: numberValue("minimum-power"),
     safetyMargin: numberValue("safety-margin"),
   };
+}
+
+function setSettings(settings) {
+  Object.entries(SETTING_FIELDS).forEach(([key, id]) => {
+    byId(id).value = String(settings[key]);
+  });
+}
+
+function encodeBase64Url(value) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 8192) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+  }
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+}
+
+function decodeBase64Url(value) {
+  if (!/^[A-Za-z0-9_-]+$/u.test(value)) throw new Error("O conteúdo compartilhado não é válido.");
+  const padded = value.replaceAll("-", "+").replaceAll("_", "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+}
+
+function scenarioPayload() {
+  return {
+    version: SCENARIO_VERSION,
+    name: byId("project-name").value.trim() || "Nova rota óptica",
+    settings: getSettings(),
+    points: points.map(({ name, distance, splices, splitter, balanced }) => ({
+      name,
+      distance,
+      splices,
+      splitter,
+      balanced,
+    })),
+  };
+}
+
+function buildShareLink() {
+  const url = new URL(window.location.href);
+  const encoded = encodeBase64Url(JSON.stringify(scenarioPayload()));
+  url.hash = `${SCENARIO_HASH_KEY}=${encoded}`;
+  return url.toString();
+}
+
+function sharedNumber(value, label, { integer = false, nonNegative = false } = {}) {
+  if (typeof value !== "number" || !Number.isFinite(value) || (integer && !Number.isInteger(value)) || (nonNegative && value < 0)) {
+    throw new Error(`O valor compartilhado de ${label} é inválido.`);
+  }
+  return value;
+}
+
+function normalizeSharedScenario(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("O cenário compartilhado não é válido.");
+  if (raw.version !== SCENARIO_VERSION) throw new Error("Esta versão do cenário compartilhado não é compatível.");
+  if (!Array.isArray(raw.points) || raw.points.length > MAX_SHARED_POINTS) {
+    throw new Error(`O cenário compartilhado deve ter no máximo ${MAX_SHARED_POINTS} pontos.`);
+  }
+
+  const knownSplitters = new Set(splitters.map((item) => item.ratio));
+  const knownBalanced = new Set(Object.keys(balancedLosses));
+  const normalizedPoints = raw.points.map((point, index) => {
+    if (!point || typeof point !== "object" || Array.isArray(point)) {
+      throw new Error(`O ponto ${index + 1} do cenário compartilhado é inválido.`);
+    }
+    const splitter = typeof point.splitter === "string" ? point.splitter : "";
+    const balanced = typeof point.balanced === "string" ? point.balanced : "Sem splitter";
+    if (splitter && !knownSplitters.has(splitter)) throw new Error(`O splitter do ponto ${index + 1} não é reconhecido.`);
+    if (!splitter && index < raw.points.length - 1) throw new Error("Somente o último ponto pode ficar sem splitter desbalanceado.");
+    if (!knownBalanced.has(balanced)) throw new Error(`O splitter local do ponto ${index + 1} não é reconhecido.`);
+
+    const name = typeof point.name === "string" ? point.name.trim() : "";
+    if (name.length > 100) throw new Error(`O nome do ponto ${index + 1} é muito longo.`);
+    return {
+      name: name || `CTO ${String(index + 1).padStart(2, "0")}`,
+      distance: sharedNumber(point.distance, `distância do ponto ${index + 1}`, { nonNegative: true }),
+      splices: sharedNumber(point.splices, `fusões do ponto ${index + 1}`, { integer: true, nonNegative: true }),
+      splitter,
+      balanced,
+    };
+  });
+
+  const rawSettings = raw.settings && typeof raw.settings === "object" ? raw.settings : {};
+  const settings = {
+    sourcePower: sharedNumber(rawSettings.sourcePower, "potência de origem"),
+    fiberLoss: sharedNumber(rawSettings.fiberLoss, "perda da fibra", { nonNegative: true }),
+    spliceLoss: sharedNumber(rawSettings.spliceLoss, "perda por fusão", { nonNegative: true }),
+    minimumPower: sharedNumber(rawSettings.minimumPower, "limite mínimo"),
+    safetyMargin: sharedNumber(rawSettings.safetyMargin, "margem de segurança", { nonNegative: true }),
+  };
+  const name = typeof raw.name === "string" ? raw.name.trim() : "";
+  if (name.length > 120) throw new Error("O nome do cenário compartilhado é muito longo.");
+  return { name: name || "Nova rota óptica", settings, points: normalizedPoints };
+}
+
+function loadSharedScenario() {
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  const encoded = params.get(SCENARIO_HASH_KEY);
+  if (!encoded) return false;
+  let raw;
+  try {
+    raw = JSON.parse(decodeBase64Url(encoded));
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("O conteúdo")) throw error;
+    throw new Error("Não foi possível ler o cenário deste link.");
+  }
+  const scenario = normalizeSharedScenario(raw);
+  byId("project-name").value = scenario.name;
+  setSettings(scenario.settings);
+  points = scenario.points;
+  return true;
+}
+
+async function copyShareLink() {
+  const input = byId("share-link");
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(input.value);
+    } else {
+      input.focus();
+      input.select();
+      if (!document.execCommand("copy")) throw new Error("Cópia não suportada.");
+    }
+    byId("copy-status").textContent = "Link copiado para a área de transferência.";
+    byId("copy-share-link").textContent = "Link copiado";
+  } catch (error) {
+    input.focus();
+    input.select();
+    byId("copy-status").textContent = "Selecione o link acima e copie manualmente.";
+  }
 }
 
 function splitterOptions(includeEmpty = false) {
@@ -451,13 +600,21 @@ function registerEvents() {
     details.open = true;
     details.scrollIntoView({ behavior: "smooth", block: "start" });
   });
+  byId("share-project").addEventListener("click", () => {
+    byId("share-link").value = buildShareLink();
+    byId("copy-status").textContent = "";
+    byId("copy-share-link").textContent = "Copiar link";
+    byId("share-dialog").showModal();
+  });
+  byId("copy-share-link").addEventListener("click", copyShareLink);
 
   byId("new-project").addEventListener("click", () => {
     points = [];
     editingIndex = null;
     byId("project-name").value = "Nova rota óptica";
-    byId("source-power").value = "3";
+    setSettings(defaultSettings);
     byId("analysis-details").open = false;
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
     renderPoints();
     window.scrollTo({ top: 0, behavior: "smooth" });
   });
@@ -468,11 +625,19 @@ async function start() {
     const data = await api("/api/catalog");
     splitters = data.splitters;
     balancedLosses = data.balancedLosses;
+    defaultSettings = data.defaults;
     byId("quick-splitter").innerHTML = splitterOptions();
     byId("quick-splitter").value = "10/90";
+    let sharedScenarioError = null;
+    try {
+      loadSharedScenario();
+    } catch (error) {
+      sharedScenarioError = error;
+    }
     registerEvents();
     renderPoints();
     await updateQuick();
+    if (sharedScenarioError) showError(sharedScenarioError.message);
   } catch (error) {
     showError(`Não foi possível iniciar a aplicação: ${error.message}`);
   }

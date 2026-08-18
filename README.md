@@ -20,6 +20,7 @@ A versão hospedada executa o motor Python diretamente no navegador por WebAssem
 - soma automática da capacidade total dos splitters de clientes;
 - cálculo da potência estimada por ponto;
 - consulta rápida de atenuação;
+- compartilhamento do cenário completo por link, sem banco de dados;
 - resumo inicial de materiais;
 - recomendações explicadas para pontos críticos, potência de origem e alternativas de splitter;
 - motor óptico, recomendações e materiais processados em Python;
@@ -40,6 +41,12 @@ Depois, abra `http://127.0.0.1:8000` no navegador. O acesso local também precis
 
 ```bash
 python -m unittest discover -s tests -v
+```
+
+## Teste do compartilhamento por link
+
+```bash
+node tests/test_share_link.js
 ```
 
 > Os valores ópticos cadastrados são referências iniciais e devem ser validados conforme os fabricantes e materiais homologados pela empresa antes do uso em produção.

@@ -8,7 +8,7 @@
       content="Construtor visual para dimensionamento de splitters ópticos desbalanceados."
     />
     <title>Dimensionamento óptico</title>
-    <link rel="stylesheet" href="styles.css?v=capacity-5" />
+    <link rel="stylesheet" href="styles.css?v=share-1" />
   </head>
   <body>
     <div id="app-error" class="error-banner" role="alert" hidden></div>
@@ -23,6 +23,7 @@
         </div>
         <div class="header-actions">
           <button class="header-button" type="button" id="open-quick">Consulta rápida</button>
+          <button class="header-button" type="button" id="share-project">Compartilhar cenário</button>
           <button class="header-button" type="button" id="new-project">Novo cenário</button>
         </div>
       </div>
@@ -181,8 +182,31 @@
       </form>
     </dialog>
 
+    <dialog class="app-dialog share-dialog" id="share-dialog">
+      <form method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">Colaboração</p>
+            <h2>Compartilhar cenário</h2>
+          </div>
+          <button class="close-button" value="cancel" aria-label="Fechar compartilhamento">×</button>
+        </div>
+        <p class="share-description">
+          O link inclui o nome, os parâmetros técnicos e todos os pontos desta rota.
+          Quem abrir verá o mesmo cenário pronto para editar.
+        </p>
+        <label class="share-link-field">
+          Link do cenário
+          <input id="share-link" type="text" readonly />
+        </label>
+        <p class="share-privacy">Os dados ficam codificados no próprio link e não são salvos em um servidor.</p>
+        <button class="primary-button dialog-action" type="button" id="copy-share-link">Copiar link</button>
+        <p class="copy-status" id="copy-status" role="status" aria-live="polite"></p>
+      </form>
+    </dialog>
+
     <footer>Protótipo inicial · Confirme as perdas com os fabricantes homologados antes do uso em campo.</footer>
     <script src="https://cdn.jsdelivr.net/pyodide/v314.0.2/full/pyodide.js"></script>
-    <script src="app.js?v=capacity-5"></script>
+    <script src="app.js?v=share-1"></script>
   </body>
 </html>

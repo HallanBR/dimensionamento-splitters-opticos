@@ -186,6 +186,11 @@ input:focus, select:focus { border-color: #a40d31; box-shadow: 0 0 0 3px rgba(16
 .quick-results small, .quick-results strong { display: block; }
 .quick-results small { color: var(--muted); font-size: .7rem; }
 .quick-results strong { margin-top: .2rem; color: var(--red-dark); font-size: 1.15rem; }
+.share-description { margin: 0 0 1rem; color: var(--muted); font-size: .8rem; line-height: 1.5; }
+.share-link-field { display: grid; gap: .35rem; }
+.share-link-field input { color: #465465; background: #f7f8fa; font-size: .76rem; }
+.share-privacy { margin: .55rem 0 0; color: var(--muted); font-size: .7rem; line-height: 1.4; }
+.copy-status { min-height: 1.1rem; margin: .5rem 0 0; color: var(--green); font-size: .72rem; font-weight: 750; text-align: center; }
 
 footer { padding: 1.5rem 1rem 2.2rem; color: var(--muted); text-align: center; font-size: .68rem; }
 
@@ -206,7 +211,7 @@ footer { padding: 1.5rem 1rem 2.2rem; color: var(--muted); text-align: center; f
 @media (max-width: 520px) {
   .header-content { gap: .85rem; padding: 1.2rem; }
   .header-copy > p:last-child { font-size: .82rem; }
-  .header-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .header-actions { display: grid; grid-template-columns: 1fr; }
   .header-button { width: 100%; }
   .app-main { padding: 1rem .75rem 2rem; }
   .project-bar, .builder-card, .route-summary, .primary-recommendation, .analysis-details { border-radius: 10px; }
