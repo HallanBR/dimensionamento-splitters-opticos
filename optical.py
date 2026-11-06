@@ -99,6 +99,15 @@ def get_splitter(ratio: str) -> Splitter:
     return splitter
 
 
+def parse_measured(value: Any, name: str) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise OpticalInputError(f"Sinal real do melhor cliente inválido em {name}.") from exc
+
+
 def calculate_route(
     points: list[dict[str, Any]],
     raw_settings: dict[str, Any] | None = None,
@@ -124,12 +133,18 @@ def calculate_route(
             splices = max(0, int(float(point.get("splices", 0) or 0)))
         except (TypeError, ValueError) as exc:
             raise OpticalInputError(f"Distância ou fusões inválidas em {name}.") from exc
+        measured = parse_measured(point.get("measured"), name)
 
         segment_loss = distance * settings["fiberLoss"] + splices * settings["spliceLoss"]
         input_power = current_power - segment_loss
-        local_loss = splitter.local_loss if splitter else 0.0
+        # "inverted" simula as saídas do desbalanceado ligadas trocadas em campo
+        inverted = bool(point.get("inverted")) and splitter is not None
+        local_loss = (splitter.pass_loss if inverted else splitter.local_loss) if splitter else 0.0
         local_power = input_power - local_loss - BALANCED_LOSSES[balanced]
-        pass_power = input_power - splitter.pass_loss if splitter else None
+        if splitter:
+            pass_power = input_power - (splitter.local_loss if inverted else splitter.pass_loss)
+        else:
+            pass_power = None
         margin = local_power - settings["minimumPower"]
         effective_margin = margin - settings["safetyMargin"]
 
@@ -147,6 +162,8 @@ def calculate_route(
                 "pass": pass_power,
                 "margin": margin,
                 "effectiveMargin": effective_margin,
+                "measured": measured,
+                "measuredDelta": measured - local_power if measured is not None else None,
             }
         )
         if pass_power is not None:
@@ -205,6 +222,186 @@ def find_best_single_change(
             ):
                 best = candidate_change
     return best
+
+
+MEASUREMENT_DIVERGENCE = 3.0
+INVERSION_MIN_GAIN = 2.0
+INVERSION_MAX_RESIDUAL = 2.0
+
+
+def _measurement_error(points: list[dict[str, Any]], settings: dict[str, Any]) -> tuple[float, float]:
+    """Retorna a soma e o maior desvio absoluto entre o sinal real e o projetado."""
+    deltas = [
+        abs(item["measuredDelta"])
+        for item in calculate_route(points, settings)
+        if item["measuredDelta"] is not None
+    ]
+    return sum(deltas), max(deltas, default=0.0)
+
+
+def diagnose_measurements(
+    points: list[dict[str, Any]],
+    settings: dict[str, Any],
+    results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Compara o sinal real do melhor cliente de cada caixa com o projeto e procura saídas invertidas.
+
+    A busca é gulosa: a cada rodada testa trocar as saídas de cada desbalanceado e
+    mantém a troca que mais aproxima o projeto dos sinais reais. A hipótese só é aceita
+    quando explica todos os sinais reais com no máximo INVERSION_MAX_RESIDUAL dB.
+    """
+    divergent = [
+        index
+        for index, item in enumerate(results)
+        if item["measuredDelta"] is not None and abs(item["measuredDelta"]) >= MEASUREMENT_DIVERGENCE
+    ]
+    diagnosis: dict[str, Any] = {"divergent": divergent, "inversions": [], "residual": None}
+    if not divergent:
+        return diagnosis
+
+    scenario = deepcopy(points)
+    current_error, _ = _measurement_error(scenario, settings)
+    inversions: list[int] = []
+    while True:
+        best: tuple[float, int] | None = None
+        for index, point in enumerate(scenario):
+            if not point.get("splitter") or index in inversions:
+                continue
+            point["inverted"] = True
+            error, _ = _measurement_error(scenario, settings)
+            point["inverted"] = False
+            if best is None or error < best[0]:
+                best = (error, index)
+        if best is None or best[0] > current_error - INVERSION_MIN_GAIN:
+            break
+        current_error = best[0]
+        inversions.append(best[1])
+        scenario[best[1]]["inverted"] = True
+
+    if inversions:
+        _, residual = _measurement_error(scenario, settings)
+        if residual <= INVERSION_MAX_RESIDUAL:
+            diagnosis["inversions"] = sorted(inversions)
+            diagnosis["residual"] = residual
+    return diagnosis
+
+
+def measurement_recommendations(
+    points: list[dict[str, Any]],
+    results: list[dict[str, Any]],
+    diagnosis: dict[str, Any],
+) -> list[dict[str, str]]:
+    if diagnosis["inversions"]:
+        names = [results[index]["name"] for index in diagnosis["inversions"]]
+        ratios = ", ".join(
+            f"{results[index]['splitter']} em {results[index]['name']}" for index in diagnosis["inversions"]
+        )
+        place = names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" e {names[-1]}"
+        return [
+            {
+                "level": "required",
+                "title": f"Possível inversão das saídas do desbalanceado em {place}",
+                "body": (
+                    "Os sinais reais dos clientes batem com a porta de clientes ligada na continuidade "
+                    f"e vice-versa ({ratios}). Com essa hipótese, o projetado fica a no máximo "
+                    f"{diagnosis['residual']:.1f} dB do sinal real. Confira a ligação das saídas em campo."
+                ),
+            }
+        ]
+    if diagnosis["divergent"]:
+        worst = max((results[index] for index in diagnosis["divergent"]), key=lambda item: abs(item["measuredDelta"]))
+        others = len(diagnosis["divergent"]) - 1
+        extra = f" Outros {others} ponto(s) também divergem." if others else ""
+        return [
+            {
+                "level": "required",
+                "title": f"Sinal real divergente em {worst['name']}",
+                "body": (
+                    f"Melhor cliente com {worst['measured']:.2f} dBm, projetado {worst['local']:.2f} dBm "
+                    f"({_signed(worst['measuredDelta'])} dB). Revise conectores, fusões, distância "
+                    f"levantada e a ligação dos splitters.{extra}"
+                ),
+            }
+        ]
+    return []
+
+
+def optimize_splitters(points: list[dict[str, Any]], raw_settings: dict[str, Any] | None) -> dict[str, Any]:
+    """Escolhe os desbalanceados que maximizam a menor margem da rota.
+
+    Mantém os splitters de clientes e o splitter da última caixa. Para uma margem-alvo,
+    percorre a rota escolhendo em cada caixa o desbalanceado com maior continuidade que
+    ainda atende o alvo localmente; uma busca binária encontra o maior alvo viável.
+    """
+    if not isinstance(points, list):
+        raise OpticalInputError("A estrutura da rota deve ser uma lista de pontos.")
+    settings = normalize_settings(raw_settings)
+    current = calculate_route(points, settings)
+    if len(points) < 2:
+        return {"changed": False, "message": "Adicione ao menos duas caixas para comparar combinações.", "changes": []}
+
+    required = settings["minimumPower"] + settings["safetyMargin"]
+
+    def plan(target: float) -> list[str] | None:
+        power = settings["sourcePower"]
+        choices: list[str] = []
+        for index, item in enumerate(current):
+            input_power = power - item["segmentLoss"]
+            available = input_power - BALANCED_LOSSES[item["balanced"]] - required
+            if index == len(current) - 1:
+                local_loss = get_splitter(item["splitter"]).local_loss if item["splitter"] else 0.0
+                if available - local_loss < target:
+                    return None
+                choices.append(item["splitter"])
+                continue
+            feasible = [splitter for splitter in SPLITTERS if available - splitter.local_loss >= target]
+            if not feasible:
+                return None
+            chosen = min(feasible, key=lambda splitter: splitter.pass_loss)
+            choices.append(chosen.ratio)
+            power = input_power - chosen.pass_loss
+        return choices
+
+    low, high = -80.0, 80.0
+    best = plan(low)
+    if best is None:
+        return {"changed": False, "message": "Não foi possível encontrar uma combinação viável.", "changes": []}
+    for _ in range(60):
+        middle = (low + high) / 2
+        candidate = plan(middle)
+        if candidate is None:
+            high = middle
+        else:
+            low, best = middle, candidate
+
+    proposal = deepcopy(points)
+    for point, ratio in zip(proposal, best):
+        point["splitter"] = ratio
+    proposed = calculate_route(proposal, settings)
+    current_score, proposed_score = route_score(current), route_score(proposed)
+    improvement = proposed_score["minimum"] - current_score["minimum"]
+    changes = [
+        {"index": index, "name": before["name"], "from": before["splitter"], "to": after["splitter"]}
+        for index, (before, after) in enumerate(zip(current, proposed))
+        if before["splitter"] != after["splitter"]
+    ]
+    changed = bool(changes) and improvement >= 0.3
+    return {
+        "changed": changed,
+        "message": (
+            f"A nova combinação melhora a menor margem da rota em {improvement:.2f} dB."
+            if changed
+            else "A combinação atual já distribui bem o sinal. Não há troca que melhore a rota de forma relevante."
+        ),
+        "changes": changes if changed else [],
+        "splitters": best if changed else [item["splitter"] for item in current],
+        "currentMinimum": current_score["minimum"],
+        "proposedMinimum": proposed_score["minimum"] if changed else current_score["minimum"],
+        "points": [
+            {"name": before["name"], "before": before["local"], "after": after["local"]}
+            for before, after in zip(current, proposed if changed else current)
+        ],
+    }
 
 
 def _signed(value: float) -> str:
@@ -367,11 +564,25 @@ def analyze_route(points: list[dict[str, Any]], raw_settings: dict[str, Any] | N
             "totalClients": 0,
         }
 
+    diagnosis = diagnose_measurements(points, settings, results)
+    for index, item in enumerate(results):
+        item["suspectedInversion"] = index in diagnosis["inversions"]
+    if diagnosis["divergent"]:
+        summary["status"] = "Sinal real divergente"
+        summary["statusCopy"] = (
+            "Os sinais reais indicam saídas invertidas"
+            if diagnosis["inversions"]
+            else "Os sinais reais não batem com o projeto"
+        )
     return {
         "settings": settings,
         "results": results,
         "summary": summary,
-        "recommendations": build_recommendations(points, settings, results),
+        "diagnosis": diagnosis,
+        "recommendations": (
+            measurement_recommendations(points, results, diagnosis)
+            + build_recommendations(points, settings, results)
+        ),
         "materials": build_materials(points),
     }
 

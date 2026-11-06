@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from optical import OpticalInputError, analyze_route, calculate_quick, catalog
+from optical import OpticalInputError, analyze_route, calculate_quick, catalog, optimize_splitters
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -21,7 +21,14 @@ STATIC_FILES = {
     "/styles.css": PROJECT_ROOT / "styles.css",
     "/app.js": PROJECT_ROOT / "app.js",
     "/optical.py": PROJECT_ROOT / "optical.py",
+    "/sw.js": PROJECT_ROOT / "sw.js",
+    "/manifest.webmanifest": PROJECT_ROOT / "manifest.webmanifest",
+    "/icons/icon-192.png": PROJECT_ROOT / "icons" / "icon-192.png",
+    "/icons/icon-512.png": PROJECT_ROOT / "icons" / "icon-512.png",
+    "/icons/icon-maskable-512.png": PROJECT_ROOT / "icons" / "icon-maskable-512.png",
 }
+mimetypes.add_type("application/manifest+json", ".webmanifest")
+mimetypes.add_type("text/javascript", ".js")
 MAX_BODY_SIZE = 1_000_000
 
 
@@ -40,7 +47,8 @@ class OpticalRequestHandler(BaseHTTPRequestHandler):
         content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
         body = file_path.read_bytes()
         self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", f"{content_type}; charset=utf-8")
+        textual = content_type.startswith("text/") or content_type.endswith(("json", "javascript"))
+        self.send_header("Content-Type", f"{content_type}; charset=utf-8" if textual else content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -52,6 +60,8 @@ class OpticalRequestHandler(BaseHTTPRequestHandler):
             payload = self.read_json()
             if path == "/api/calculate":
                 response = analyze_route(payload.get("points", []), payload.get("settings", {}))
+            elif path == "/api/optimize":
+                response = optimize_splitters(payload.get("points", []), payload.get("settings", {}))
             elif path == "/api/quick":
                 response = calculate_quick(payload.get("inputPower"), str(payload.get("splitter", "")))
             else:

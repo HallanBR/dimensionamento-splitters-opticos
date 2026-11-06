@@ -6,6 +6,7 @@ from optical import (
     build_recommendations,
     calculate_quick,
     calculate_route,
+    optimize_splitters,
 )
 
 
@@ -118,6 +119,73 @@ class OpticalCalculatorTests(unittest.TestCase):
     def test_rejeita_splitter_desconhecido(self) -> None:
         with self.assertRaises(OpticalInputError):
             calculate_quick(-8, "12/88")
+
+
+FIELD_SETTINGS = {**SETTINGS, "sourcePower": 4}
+
+
+def field_route(**measured: float) -> list[dict]:
+    names = ["SJL-CTO0425", "SJL-CTO0424", "SJL-CTO0423", "SJL-CTO0422", "SJL-CTO0421"]
+    ratios = ["15/85", "15/85", "20/80", "30/70", ""]
+    distances = [0, 0.91, 0, 0, 0]
+    return [
+        {
+            "name": name,
+            "distance": distance,
+            "splices": 0,
+            "splitter": ratio,
+            "balanced": "1x16",
+            "measured": measured.get(name.replace("-", "_")),
+        }
+        for name, ratio, distance in zip(names, ratios, distances)
+    ]
+
+
+class FieldMeasurementTests(unittest.TestCase):
+    def test_calcula_a_diferenca_entre_sinal_real_e_projetado(self) -> None:
+        results = calculate_route(field_route(SJL_CTO0425=-19.5), FIELD_SETTINGS)
+        self.assertAlmostEqual(results[0]["measuredDelta"], -0.8)
+        self.assertIsNone(results[1]["measured"])
+
+    def test_identifica_saidas_invertidas_em_duas_caixas(self) -> None:
+        analysis = analyze_route(field_route(SJL_CTO0423=-15, SJL_CTO0421=-26), FIELD_SETTINGS)
+        self.assertEqual(analysis["diagnosis"]["inversions"], [2, 3])
+        self.assertTrue(analysis["results"][3]["suspectedInversion"])
+        self.assertIn("inversão", analysis["recommendations"][0]["title"])
+
+    def test_sinal_real_proximo_do_projeto_nao_gera_alerta(self) -> None:
+        analysis = analyze_route(field_route(SJL_CTO0423=-20.5), FIELD_SETTINGS)
+        self.assertEqual(analysis["diagnosis"]["divergent"], [])
+        self.assertNotIn("divergente", analysis["recommendations"][0]["title"])
+
+    def test_divergencia_sem_explicacao_aponta_o_ponto(self) -> None:
+        analysis = analyze_route(field_route(SJL_CTO0425=-25), FIELD_SETTINGS)
+        self.assertEqual(analysis["diagnosis"]["inversions"], [])
+        self.assertIn("SJL-CTO0425", analysis["recommendations"][0]["title"])
+
+    def test_rejeita_sinal_real_invalido(self) -> None:
+        route = field_route()
+        route[0]["measured"] = "abc"
+        with self.assertRaises(OpticalInputError):
+            calculate_route(route, FIELD_SETTINGS)
+
+
+class OptimizerTests(unittest.TestCase):
+    def test_otimizador_melhora_a_menor_margem(self) -> None:
+        result = optimize_splitters(field_route(), FIELD_SETTINGS)
+        self.assertTrue(result["changed"])
+        self.assertGreater(result["proposedMinimum"], result["currentMinimum"])
+        self.assertEqual(result["splitters"][-1], "")
+
+    def test_otimizador_mantem_rota_ja_otimizada(self) -> None:
+        first = optimize_splitters(field_route(), FIELD_SETTINGS)
+        route = field_route()
+        for point, ratio in zip(route, first["splitters"]):
+            point["splitter"] = ratio
+        second = optimize_splitters(route, FIELD_SETTINGS)
+        self.assertFalse(second["changed"])
+        self.assertEqual(second["changes"], [])
+
 
 
 if __name__ == "__main__":

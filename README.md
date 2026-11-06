@@ -20,7 +20,13 @@ A versão hospedada executa o motor Python diretamente no navegador por WebAssem
 - soma automática da capacidade total dos splitters de clientes;
 - cálculo da potência estimada por ponto;
 - consulta rápida de atenuação;
-- compartilhamento do cenário completo por link, sem banco de dados;
+- compartilhamento do cenário completo por link comprimido, sem banco de dados (links antigos continuam abrindo);
+- edição direta na linha de cada caixa, inserção de caixas no meio da rota e exclusão com opção de desfazer;
+- sinal real do melhor cliente de cada caixa, com diferença para o projetado e detecção de saídas de desbalanceado invertidas;
+- gráfico da potência projetada e do sinal real ao longo da rota;
+- otimizador opcional de desbalanceados, que só altera a rota quando a sugestão é aplicada;
+- modo noturno;
+- instalação como aplicativo no celular, com cache do motor Python para abrir mais rápido e funcionar sem internet;
 - resumo inicial de materiais;
 - recomendações explicadas para pontos críticos, potência de origem e alternativas de splitter;
 - motor óptico, recomendações e materiais processados em Python;

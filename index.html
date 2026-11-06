@@ -8,7 +8,23 @@
       content="Construtor visual para dimensionamento de splitters ópticos desbalanceados."
     />
     <title>Dimensionamento óptico</title>
-    <link rel="stylesheet" href="styles.css?v=share-1" />
+    <script>
+      // Aplica o tema antes de desenhar a página para não piscar em branco
+      (() => {
+        let theme = null;
+        try { theme = localStorage.getItem("tema"); } catch (error) {}
+        if (theme !== "dark" && theme !== "light") {
+          theme = window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
+    <meta name="theme-color" content="#9d0b2c" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="icons/icon-192.png" />
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <link rel="stylesheet" href="styles.css?v=campo-1" />
   </head>
   <body>
     <div id="app-error" class="error-banner" role="alert" hidden></div>
@@ -25,15 +41,21 @@
           <button class="header-button" type="button" id="open-quick">Consulta rápida</button>
           <button class="header-button" type="button" id="share-project">Compartilhar cenário</button>
           <button class="header-button" type="button" id="new-project">Novo cenário</button>
+          <button class="header-button theme-toggle" type="button" id="theme-toggle" aria-pressed="false">
+            <span aria-hidden="true" id="theme-icon">☾</span>
+            <span id="theme-label">Modo noturno</span>
+          </button>
+          <button class="header-button install-button" type="button" id="install-app" hidden>Instalar app</button>
         </div>
       </div>
     </header>
 
     <main class="app-main">
+      <div class="workspace-main">
       <section class="project-bar" aria-label="Identificação do cenário">
         <label class="project-name">
-          <span>Nome do cenário</span>
-          <input id="project-name" value="Nova rota óptica" />
+          <span>Cenário</span>
+          <input id="project-name" value="" placeholder="Dê um nome à rota (ex.: SJL CTO0425 a CTO0421)" maxlength="120" />
         </label>
         <div class="runtime-status" id="runtime-status" data-state="loading" aria-live="polite">
           <span class="runtime-dot" aria-hidden="true"></span>
@@ -47,11 +69,13 @@
       <section class="builder-card" aria-labelledby="builder-title">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">Construtor da rota</p>
-            <h2 id="builder-title">Desenhe o caminho do sinal</h2>
-            <p>Comece pelo DIO e adicione as caixas na ordem em que aparecem na rede.</p>
+            <h2 id="builder-title">Construtor da rota</h2>
+            <p>Do DIO às CTOs, na ordem em que aparecem na rede.</p>
           </div>
-          <button class="text-button" type="button" id="open-settings">Parâmetros técnicos</button>
+          <div class="heading-actions">
+            <button class="text-button" type="button" id="open-optimizer">Otimizar splitters</button>
+            <button class="text-button" type="button" id="open-settings">Parâmetros técnicos</button>
+          </div>
         </div>
 
         <div class="network-canvas">
@@ -78,7 +102,9 @@
           </button>
         </div>
       </section>
+      </div>
 
+      <aside class="workspace-side" aria-label="Resultado da rota">
       <section class="route-summary" id="route-summary" data-state="empty" aria-live="polite">
         <div class="summary-state">
           <span class="summary-dot" aria-hidden="true"></span>
@@ -103,6 +129,18 @@
           <strong id="minimum-margin">—</strong>
           <span>até o limite configurado</span>
         </div>
+      </section>
+
+      <section class="chart-card" id="chart-card" aria-labelledby="chart-title" hidden>
+        <div class="chart-heading">
+          <h3 id="chart-title">Potência nos clientes</h3>
+          <div class="chart-legend">
+            <span><i class="key estimated"></i>Projetado</span>
+            <span id="chart-legend-measured" hidden><i class="key measured"></i>Melhor cliente real</span>
+          </div>
+        </div>
+        <div class="chart-wrap" id="power-chart"></div>
+        <p class="chart-caption">Eixo horizontal: número da caixa. Valores em dBm.</p>
       </section>
 
       <section class="primary-recommendation" id="primary-recommendation" hidden>
@@ -140,6 +178,7 @@
           </section>
         </div>
       </details>
+      </aside>
     </main>
 
     <dialog class="app-dialog" id="settings-dialog">
@@ -205,8 +244,34 @@
       </form>
     </dialog>
 
+    <dialog class="app-dialog optimize-dialog" id="optimize-dialog">
+      <form method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">Opcional</p>
+            <h2>Otimizar splitters</h2>
+          </div>
+          <button class="close-button" value="cancel" aria-label="Fechar otimizador">×</button>
+        </div>
+        <p class="share-description">
+          Compara combinações de desbalanceados para equilibrar o sinal entre as caixas.
+          Os splitters de clientes não mudam e nada é alterado sem você aplicar.
+        </p>
+        <div id="optimize-body"></div>
+        <div class="dialog-buttons">
+          <button class="secondary-button" value="cancel">Manter como está</button>
+          <button class="primary-button" type="button" id="apply-optimization" hidden>Aplicar sugestão</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden>
+      <span id="toast-text"></span>
+      <button type="button" id="toast-undo">Desfazer</button>
+    </div>
+
     <footer>Protótipo inicial · Confirme as perdas com os fabricantes homologados antes do uso em campo.</footer>
     <script src="https://cdn.jsdelivr.net/pyodide/v314.0.2/full/pyodide.js"></script>
-    <script src="app.js?v=share-1"></script>
+    <script src="app.js?v=campo-1"></script>
   </body>
 </html>
