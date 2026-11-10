@@ -369,6 +369,7 @@ function renderPoints() {
               <span class="node-index" aria-hidden="true">${index + 1}</span>
               <div class="node-title">
                 <input class="name-input" data-field="name" value="${escapeHtml(point.name)}" placeholder="Nome da caixa" aria-label="Nome da caixa ${index + 1}">
+                <span class="inversion-flag" data-output="attenuation" hidden>Atenuação antes?</span>
                 <span class="inversion-flag" data-output="inversion" hidden>Saídas invertidas?</span>
               </div>
               <label class="splitter-core">
@@ -537,8 +538,12 @@ function patchRouteOutputs(results) {
       delta.className = `delta-chip ${deltaState(result.measuredDelta)}`;
       delta.title = `Melhor cliente real ${formatDbm(result.measured)} · projetado ${formatDbm(result.local)}`;
     }
+    const attenuation = node.querySelector('[data-output="attenuation"]');
+    const suspectedAttenuation = result.suspectedAttenuation ?? null;
+    attenuation.hidden = suspectedAttenuation === null;
+    if (suspectedAttenuation !== null) attenuation.textContent = `Atenuação antes? ~${suspectedAttenuation.toFixed(1)} dB`;
     node.querySelector('[data-output="inversion"]').hidden = !result.suspectedInversion;
-    node.classList.toggle("is-suspect", Boolean(result.suspectedInversion));
+    node.classList.toggle("is-suspect", Boolean(result.suspectedInversion) || suspectedAttenuation !== null);
   });
 }
 

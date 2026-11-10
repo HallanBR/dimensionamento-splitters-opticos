@@ -170,6 +170,60 @@ class FieldMeasurementTests(unittest.TestCase):
             calculate_route(route, FIELD_SETTINGS)
 
 
+CASCADE_SETTINGS = {**SETTINGS, "sourcePower": 2}
+
+
+def cascade_route(*measured: float | None) -> list[dict]:
+    """Rota real da SJL: 0382 → 0378, sinais do melhor cliente medidos em campo."""
+    boxes = [
+        ("SJL-CTO0382", "10/90", "1x8"),
+        ("SJL-CTO0381", "15/85", "1x8"),
+        ("SJL-CTO0380", "20/80", "1x8"),
+        ("SJL-CTO0379", "30/70", "1x16"),
+        ("SJL-CTO0378", "", "1x8"),
+    ]
+    return [
+        {"name": name, "distance": 0, "splices": 0, "splitter": ratio, "balanced": balanced, "measured": value}
+        for (name, ratio, balanced), value in zip(boxes, measured)
+    ]
+
+
+class CascadeDiagnosisTests(unittest.TestCase):
+    def test_atenuacao_no_inicio_e_inversao_depois_em_ordem_de_tratamento(self) -> None:
+        analysis = analyze_route(cascade_route(-19.73, -24, -23, -23, -21), CASCADE_SETTINGS)
+        diagnosis = analysis["diagnosis"]
+        self.assertEqual([item["index"] for item in diagnosis["attenuations"]], [1])
+        self.assertAlmostEqual(diagnosis["attenuations"][0]["loss"], 4.8, delta=0.5)
+        self.assertEqual(diagnosis["inversions"], [3])
+        first, second = analysis["recommendations"][:2]
+        self.assertIn("1º passo: Atenuação", first["title"])
+        self.assertIn("entre SJL-CTO0382 e SJL-CTO0381", first["title"])
+        self.assertIn("2º passo: Possível inversão", second["title"])
+        self.assertIn("SJL-CTO0379", second["title"])
+        # Desfazer a inversão antes de tratar a atenuação derrubaria os clientes da 0379
+        self.assertIn("Só desfaça a inversão depois", second["body"])
+        self.assertEqual(analysis["results"][1]["suspectedAttenuation"], diagnosis["attenuations"][0]["loss"])
+        self.assertTrue(all(not item["title"].startswith("Comparar") for item in analysis["recommendations"]))
+
+    def test_so_atenuacao_aponta_o_trecho_e_nao_inversao(self) -> None:
+        analysis = analyze_route(cascade_route(-19.7, -23.4, -23.4, -26.6, -19.7), CASCADE_SETTINGS)
+        self.assertEqual([item["index"] for item in analysis["diagnosis"]["attenuations"]], [1])
+        self.assertEqual(analysis["diagnosis"]["inversions"], [])
+        self.assertIn("entre SJL-CTO0382 e SJL-CTO0381", analysis["recommendations"][0]["title"])
+
+    def test_atenuacao_tambem_explica_problema_local_isolado(self) -> None:
+        analysis = analyze_route(cascade_route(-19.7, -23.4, -23.4, -26.6, -25.7), CASCADE_SETTINGS)
+        self.assertEqual([item["index"] for item in analysis["diagnosis"]["localIssues"]], [4])
+        titles = [item["title"] for item in analysis["recommendations"][:2]]
+        self.assertIn("1º passo: Atenuação", titles[0])
+        self.assertIn("2º passo: Problema local em SJL-CTO0378", titles[1])
+
+    def test_sem_explicacao_aponta_a_primeira_caixa_divergente(self) -> None:
+        analysis = analyze_route(cascade_route(-19.7, -26, -18.4, -15, -22), CASCADE_SETTINGS)
+        self.assertEqual(analysis["diagnosis"]["attenuations"], [])
+        self.assertIn("a partir de SJL-CTO0381", analysis["recommendations"][0]["title"])
+
+
 class OptimizerTests(unittest.TestCase):
     def test_otimizador_melhora_a_menor_margem(self) -> None:
         result = optimize_splitters(field_route(), FIELD_SETTINGS)

@@ -2,7 +2,7 @@
 
 // Arquivos do app: sempre busca a versão nova na rede e usa o cache só sem conexão.
 // Motor Python (Pyodide): versão fixa, então fica no cache e abre quase na hora.
-const APP_CACHE = "optica-app-v1";
+const APP_CACHE = "optica-app-v2";
 const PYODIDE_CACHE = "optica-pyodide-v314.0.2";
 const APP_SHELL = [
   "./",
