@@ -19,15 +19,15 @@ A versão hospedada executa o motor Python diretamente no navegador por WebAssem
 - última caixa apenas com splitter local, sem desbalanceado;
 - soma automática da capacidade total dos splitters de clientes;
 - cálculo da potência estimada por ponto;
-- consulta rápida de atenuação;
 - compartilhamento do cenário completo por link comprimido, sem banco de dados (links antigos continuam abrindo);
 - edição direta na linha de cada caixa, inserção de caixas no meio da rota e exclusão com opção de desfazer;
-- sinal real do melhor cliente de cada caixa, com diferença para o projetado e detecção de saídas de desbalanceado invertidas;
+- sinal real do melhor cliente de cada caixa, com diferença para o projetado e diagnóstico de atenuação em trecho e de saídas de desbalanceado invertidas, em passos na ordem da rota;
+- relatório de campo pronto para copiar ou enviar pelo WhatsApp, com os passos, os sinais por caixa e os parâmetros usados;
 - gráfico da potência projetada e do sinal real ao longo da rota;
-- otimizador opcional de desbalanceados, que só altera a rota quando a sugestão é aplicada;
+- ferramentas de projeto em um menu à parte: otimizador de desbalanceados (só altera a rota quando a sugestão é aplicada) e consulta rápida de atenuação;
 - modo noturno;
 - instalação como aplicativo no celular, com cache do motor Python para abrir mais rápido e funcionar sem internet;
-- recomendações explicadas para pontos críticos, potência de origem e alternativas de splitter;
+- recomendações explicadas para pontos críticos, potência de origem e alternativas de splitter (ocultas quando há falha em campo, para não mascarar o defeito);
 - motor óptico e recomendações processados em Python;
 - JavaScript restrito à interface e à ponte com o motor Python;
 - funcionamento sem banco de dados e sem autenticação.
@@ -40,7 +40,7 @@ Requer apenas Python 3.10 ou superior, sem pacotes externos:
 python server.py
 ```
 
-Depois, abra `http://127.0.0.1:8000` no navegador. O acesso local também precisa de internet na primeira execução para carregar o ambiente Python usado pelo navegador.
+O servidor só entrega os arquivos do app; os cálculos rodam no navegador. Depois, abra `http://127.0.0.1:8000` no navegador. O acesso local também precisa de internet na primeira execução para carregar o ambiente Python usado pelo navegador.
 
 ## Testes do motor óptico
 

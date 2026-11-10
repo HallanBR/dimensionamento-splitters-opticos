@@ -67,7 +67,7 @@ async function ensurePython() {
       runtime.FS.writeFile("optical.py", await sourceResponse.text());
       await runtime.runPythonAsync(`
 import json
-from optical import OpticalInputError, analyze_route, calculate_quick, catalog, optimize_splitters
+from optical import OpticalInputError, analyze_route, build_field_report, calculate_quick, catalog, optimize_splitters
 
 def _handle_browser_request(raw_request):
     try:
@@ -82,6 +82,13 @@ def _handle_browser_request(raw_request):
             result = optimize_splitters(payload.get("points", []), payload.get("settings", {}))
         elif action == "quick":
             result = calculate_quick(payload.get("inputPower"), str(payload.get("splitter", "")))
+        elif action == "report":
+            result = build_field_report(
+                payload.get("points", []),
+                payload.get("settings", {}),
+                str(payload.get("name", "")),
+                str(payload.get("date", "")),
+            )
         else:
             raise OpticalInputError("Operação não reconhecida.")
         response = {"ok": True, "data": result}
@@ -124,6 +131,7 @@ async function api(path, payload, signal) {
     "/api/calculate": "calculate",
     "/api/optimize": "optimize",
     "/api/quick": "quick",
+    "/api/report": "report",
   }[path];
   if (!action) throw new Error("Operação não reconhecida.");
   const data = await callPython(action, payload);
@@ -674,6 +682,54 @@ function renderRecommendations(recommendations) {
     .join("");
 }
 
+async function openReport() {
+  const text = byId("report-text");
+  const status = byId("report-status");
+  status.textContent = "";
+  byId("copy-report").textContent = "Copiar relatório";
+  byId("share-report").hidden = typeof navigator.share !== "function";
+  text.value = "Gerando relatório...";
+  byId("report-dialog").showModal();
+  if (!points.length) {
+    text.value = "Adicione as caixas da rota para gerar o relatório.";
+    return;
+  }
+  try {
+    const result = await api("/api/report", {
+      settings: getSettings(),
+      points,
+      name: byId("project-name").value,
+      date: new Date().toLocaleDateString("pt-BR"),
+    });
+    text.value = result.text;
+  } catch (error) {
+    text.value = "";
+    status.textContent = error.message;
+  }
+}
+
+async function copyReport() {
+  const text = byId("report-text");
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("Cópia não suportada.");
+    await navigator.clipboard.writeText(text.value);
+    byId("report-status").textContent = "Relatório copiado. Cole no WhatsApp ou e-mail.";
+    byId("copy-report").textContent = "Relatório copiado";
+  } catch (error) {
+    text.focus();
+    text.select();
+    byId("report-status").textContent = "Selecione o texto acima e copie manualmente.";
+  }
+}
+
+async function shareReport() {
+  try {
+    await navigator.share({ title: "Relatório de campo", text: byId("report-text").value });
+  } catch (error) {
+    if (error?.name !== "AbortError") byId("report-status").textContent = "Não foi possível abrir o compartilhamento.";
+  }
+}
+
 async function openOptimizer() {
   const dialog = byId("optimize-dialog");
   const body = byId("optimize-body");
@@ -852,6 +908,17 @@ function registerEvents() {
     .forEach((id) => byId(id).addEventListener("input", updateQuick));
 
   byId("open-settings").addEventListener("click", () => byId("settings-dialog").showModal());
+  const toolsMenu = byId("tools-menu");
+  toolsMenu.addEventListener("click", (event) => {
+    if (event.target.closest(".tools-menu-list button")) toolsMenu.open = false;
+  });
+  document.addEventListener("click", (event) => {
+    if (toolsMenu.open && !toolsMenu.contains(event.target)) toolsMenu.open = false;
+  });
+  byId("open-report").addEventListener("click", openReport);
+  byId("open-report-inline").addEventListener("click", openReport);
+  byId("copy-report").addEventListener("click", copyReport);
+  byId("share-report").addEventListener("click", shareReport);
   byId("open-optimizer").addEventListener("click", openOptimizer);
   byId("apply-optimization").addEventListener("click", applyOptimization);
   byId("open-quick").addEventListener("click", () => {
