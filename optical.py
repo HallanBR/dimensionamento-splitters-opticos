@@ -7,6 +7,7 @@ interfaces e futuramente integrado ao sistema de solicitação de materiais.
 from __future__ import annotations
 
 from copy import deepcopy
+from statistics import median
 from dataclasses import dataclass
 from typing import Any
 
@@ -136,7 +137,8 @@ def calculate_route(
         measured = parse_measured(point.get("measured"), name)
 
         segment_loss = distance * settings["fiberLoss"] + splices * settings["spliceLoss"]
-        input_power = current_power - segment_loss
+        # "extraLoss" simula uma atenuação desconhecida no trecho que chega à caixa
+        input_power = current_power - segment_loss - float(point.get("extraLoss", 0) or 0)
         # "inverted" simula as saídas do desbalanceado ligadas trocadas em campo
         inverted = bool(point.get("inverted")) and splitter is not None
         local_loss = (splitter.pass_loss if inverted else splitter.local_loss) if splitter else 0.0
@@ -225,18 +227,27 @@ def find_best_single_change(
 
 
 MEASUREMENT_DIVERGENCE = 3.0
-INVERSION_MIN_GAIN = 2.0
-INVERSION_MAX_RESIDUAL = 2.0
+HYPOTHESIS_MIN_GAIN = 2.0
+HYPOTHESIS_MAX_RESIDUAL = 2.5
+ATTENUATION_MIN = 2.0
+MAX_HYPOTHESES = 4
 
 
-def _measurement_error(points: list[dict[str, Any]], settings: dict[str, Any]) -> tuple[float, float]:
-    """Retorna a soma e o maior desvio absoluto entre o sinal real e o projetado."""
-    deltas = [
-        abs(item["measuredDelta"])
-        for item in calculate_route(points, settings)
-        if item["measuredDelta"] is not None
-    ]
-    return sum(deltas), max(deltas, default=0.0)
+def _residuals(points: list[dict[str, Any]], settings: dict[str, Any]) -> list[float | None]:
+    return [item["measuredDelta"] for item in calculate_route(points, settings)]
+
+
+def _error(residuals: list[float | None]) -> float:
+    return sum(abs(value) for value in residuals if value is not None)
+
+
+def _fit_attenuations(scenario: list[dict[str, Any]], settings: dict[str, Any], indexes: list[int]) -> None:
+    """Ajusta o valor de cada atenuação suspeita pela mediana dos desvios das caixas seguintes."""
+    for _ in range(3):
+        for index in indexes:
+            scenario[index]["extraLoss"] = 0.0
+            downstream = [-value for value in _residuals(scenario, settings)[index:] if value is not None]
+            scenario[index]["extraLoss"] = max(0.0, median(downstream))
 
 
 def diagnose_measurements(
@@ -244,81 +255,194 @@ def diagnose_measurements(
     settings: dict[str, Any],
     results: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Compara o sinal real do melhor cliente de cada caixa com o projeto e procura saídas invertidas.
+    """Compara o sinal real do melhor cliente de cada caixa com o projeto e procura a causa.
 
-    A busca é gulosa: a cada rodada testa trocar as saídas de cada desbalanceado e
-    mantém a troca que mais aproxima o projeto dos sinais reais. A hipótese só é aceita
-    quando explica todos os sinais reais com no máximo INVERSION_MAX_RESIDUAL dB.
+    Duas hipóteses de falha são combinadas: atenuação no trecho que chega a uma caixa
+    (afeta ela e todas as seguintes) e saídas do desbalanceado ligadas trocadas. A busca
+    é gulosa: a cada rodada testa cada hipótese em cada caixa, reajusta o valor das
+    atenuações e mantém a que mais aproxima o projeto dos sinais reais. Em empate vence
+    a caixa mais próxima da origem, porque o tratamento em campo segue do início ao fim.
+    O conjunto só é aceito se explicar os sinais reais com no máximo
+    HYPOTHESIS_MAX_RESIDUAL dB, tolerando uma caixa com problema local.
     """
     divergent = [
         index
         for index, item in enumerate(results)
         if item["measuredDelta"] is not None and abs(item["measuredDelta"]) >= MEASUREMENT_DIVERGENCE
     ]
-    diagnosis: dict[str, Any] = {"divergent": divergent, "inversions": [], "residual": None}
+    diagnosis: dict[str, Any] = {
+        "divergent": divergent,
+        "attenuations": [],
+        "inversions": [],
+        "localIssues": [],
+        "residual": None,
+    }
     if not divergent:
         return diagnosis
 
+    measured = [item["measuredDelta"] is not None for item in results]
     scenario = deepcopy(points)
-    current_error, _ = _measurement_error(scenario, settings)
+    current_error = _error(_residuals(scenario, settings))
+    attenuations: list[int] = []
     inversions: list[int] = []
-    while True:
-        best: tuple[float, int] | None = None
+    for _ in range(MAX_HYPOTHESES):
+        best: tuple[float, str, int, list[dict[str, Any]]] | None = None
         for index, point in enumerate(scenario):
-            if not point.get("splitter") or index in inversions:
-                continue
-            point["inverted"] = True
-            error, _ = _measurement_error(scenario, settings)
-            point["inverted"] = False
-            if best is None or error < best[0]:
-                best = (error, index)
-        if best is None or best[0] > current_error - INVERSION_MIN_GAIN:
+            for kind in ("attenuation", "inversion"):
+                if kind == "attenuation":
+                    # Com um só sinal real depois do trecho não dá para separar atenuação de problema local
+                    if index in attenuations or sum(measured[index:]) < 2:
+                        continue
+                elif index in inversions or not point.get("splitter"):
+                    continue
+                trial = deepcopy(scenario)
+                trial_attenuations = attenuations + [index] if kind == "attenuation" else attenuations
+                if kind == "inversion":
+                    trial[index]["inverted"] = True
+                _fit_attenuations(trial, settings, trial_attenuations)
+                if any(trial[item]["extraLoss"] < ATTENUATION_MIN for item in trial_attenuations):
+                    continue
+                error = _error(_residuals(trial, settings))
+                if best is None or error < best[0] - 1e-9:
+                    best = (error, kind, index, trial)
+        if best is None or best[0] > current_error - HYPOTHESIS_MIN_GAIN:
             break
-        current_error = best[0]
-        inversions.append(best[1])
-        scenario[best[1]]["inverted"] = True
+        current_error, kind, index, scenario = best
+        (attenuations if kind == "attenuation" else inversions).append(index)
 
-    if inversions:
-        _, residual = _measurement_error(scenario, settings)
-        if residual <= INVERSION_MAX_RESIDUAL:
-            diagnosis["inversions"] = sorted(inversions)
-            diagnosis["residual"] = residual
+    if not attenuations and not inversions:
+        return diagnosis
+    residuals = _residuals(scenario, settings)
+    unexplained = [
+        index for index, value in enumerate(residuals) if value is not None and abs(value) > HYPOTHESIS_MAX_RESIDUAL
+    ]
+    if len(unexplained) > 1:
+        return diagnosis
+
+    explained = [abs(value) for index, value in enumerate(residuals) if value is not None and index not in unexplained]
+    diagnosis["attenuations"] = [
+        {"index": index, "loss": scenario[index]["extraLoss"]} for index in sorted(attenuations)
+    ]
+    diagnosis["inversions"] = sorted(inversions)
+    diagnosis["localIssues"] = [
+        {"index": index, "delta": residuals[index]}
+        for index in unexplained
+        if abs(residuals[index]) >= MEASUREMENT_DIVERGENCE
+    ]
+    diagnosis["residual"] = max(explained, default=0.0)
+    diagnosis["scenario"] = scenario
     return diagnosis
+
+
+def _place(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" e {names[-1]}"
 
 
 def measurement_recommendations(
     points: list[dict[str, Any]],
+    settings: dict[str, Any],
     results: list[dict[str, Any]],
     diagnosis: dict[str, Any],
 ) -> list[dict[str, str]]:
-    if diagnosis["inversions"]:
-        names = [results[index]["name"] for index in diagnosis["inversions"]]
-        ratios = ", ".join(
-            f"{results[index]['splitter']} em {results[index]['name']}" for index in diagnosis["inversions"]
-        )
-        place = names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" e {names[-1]}"
-        return [
-            {
-                "level": "required",
-                "title": f"Possível inversão das saídas do desbalanceado em {place}",
-                "body": (
-                    "Os sinais reais dos clientes batem com a porta de clientes ligada na continuidade "
-                    f"e vice-versa ({ratios}). Com essa hipótese, o projetado fica a no máximo "
-                    f"{diagnosis['residual']:.1f} dB do sinal real. Confira a ligação das saídas em campo."
-                ),
-            }
-        ]
+    """Monta os passos de tratamento em campo, sempre na ordem da rota (da origem ao fim)."""
+    faults = (
+        [("attenuation", item["index"], item) for item in diagnosis["attenuations"]]
+        + [("inversion", index, None) for index in diagnosis["inversions"]]
+        + [("local", item["index"], item) for item in diagnosis["localIssues"]]
+    )
+    if faults:
+        faults.sort(key=lambda fault: (fault[1], ["attenuation", "inversion", "local"].index(fault[0])))
+        scenario = diagnosis["scenario"]
+        fitted = calculate_route(scenario, settings)
+        recommendations = []
+        for step, (kind, index, data) in enumerate(faults, start=1):
+            name = results[index]["name"]
+            prefix = f"{step}º passo: " if len(faults) > 1 else ""
+            if kind == "attenuation":
+                previous = results[index - 1]["name"] if index else "a origem"
+                downstream = [item["name"] for item in results[index:] if item["measured"] is not None]
+                expected = (
+                    f"Meça a continuidade de {previous} (esperado {results[index - 1]['pass']:.1f} dBm) "
+                    if index
+                    else "Meça a saída da origem "
+                )
+                unmeasured = (
+                    f" Como {previous} não tem sinal real, a perda também pode estar antes dela."
+                    if index and results[index - 1]["measured"] is None
+                    else ""
+                )
+                recommendations.append(
+                    {
+                        "level": "required",
+                        "title": f"{prefix}Atenuação de cerca de {data['loss']:.1f} dB entre {previous} e {name}",
+                        "body": (
+                            f"Os sinais reais de {_place(downstream)} estão todos cerca de {data['loss']:.1f} dB "
+                            f"abaixo do projeto. A perda está no trecho que chega a {name}: saída de "
+                            f"continuidade, cabo ou fusões. {expected}e a entrada de {name} "
+                            f"(esperado {results[index]['input']:.1f} dBm; com a falha deve dar perto de "
+                            f"{fitted[index]['input']:.1f} dBm).{unmeasured} Trate este trecho antes das "
+                            "caixas seguintes, que só herdam a perda."
+                        ),
+                    }
+                )
+            elif kind == "inversion":
+                item = fitted[index]
+                splitter = get_splitter(item["splitter"])
+                local_share, pass_share = item["splitter"].split("/")
+                body = (
+                    "Os sinais reais batem com a porta de clientes ligada na continuidade e vice-versa. "
+                    f"Com cerca de {item['input']:.1f} dBm na entrada, ligado certo a porta de "
+                    f"{int(local_share)}% (clientes) dá {item['input'] - splitter.local_loss:.1f} dBm e a de "
+                    f"{int(pass_share)}% (continuidade) dá {item['input'] - splitter.pass_loss:.1f} dBm; "
+                    "invertido, dá o contrário."
+                )
+                upstream = [att for att in diagnosis["attenuations"] if att["index"] < index]
+                if upstream:
+                    trial = deepcopy(scenario)
+                    trial[index]["inverted"] = False
+                    after = calculate_route(trial, settings)[index]
+                    if after["effectiveMargin"] < 0:
+                        origin = results[upstream[0]["index"]]["name"]
+                        body += (
+                            f" Só desfaça a inversão depois de corrigir a atenuação antes de {origin}: "
+                            f"antes disso os clientes de {name} cairiam para cerca de {after['local']:.1f} dBm."
+                        )
+                recommendations.append(
+                    {
+                        "level": "required",
+                        "title": f"{prefix}Possível inversão das saídas do {item['splitter']} em {name}",
+                        "body": body,
+                    }
+                )
+            else:
+                recommendations.append(
+                    {
+                        "level": "required",
+                        "title": f"{prefix}Problema local em {name}",
+                        "body": (
+                            f"Mesmo considerando as outras falhas, o melhor cliente está {_signed(data['delta'])} dB "
+                            "fora do esperado e as caixas seguintes não acompanham. Revise o splitter de "
+                            "clientes, os conectores e o drop desta caixa."
+                        ),
+                    }
+                )
+        return recommendations
     if diagnosis["divergent"]:
-        worst = max((results[index] for index in diagnosis["divergent"]), key=lambda item: abs(item["measuredDelta"]))
-        others = len(diagnosis["divergent"]) - 1
-        extra = f" Outros {others} ponto(s) também divergem." if others else ""
+        first = results[diagnosis["divergent"][0]]
+        others = [results[index]["name"] for index in diagnosis["divergent"][1:]]
+        extra = (
+            f" {_place(others)} também {'divergem' if len(others) > 1 else 'diverge'}; trate {first['name']} "
+            "primeiro, porque um problema no início da rota se repete nas caixas seguintes."
+            if others
+            else ""
+        )
         return [
             {
                 "level": "required",
-                "title": f"Sinal real divergente em {worst['name']}",
+                "title": f"Sinal real divergente a partir de {first['name']}",
                 "body": (
-                    f"Melhor cliente com {worst['measured']:.2f} dBm, projetado {worst['local']:.2f} dBm "
-                    f"({_signed(worst['measuredDelta'])} dB). Revise conectores, fusões, distância "
+                    f"Melhor cliente com {first['measured']:.2f} dBm, projetado {first['local']:.2f} dBm "
+                    f"({_signed(first['measuredDelta'])} dB). Revise conectores, fusões, distância "
                     f"levantada e a ligação dos splitters.{extra}"
                 ),
             }
@@ -565,24 +689,35 @@ def analyze_route(points: list[dict[str, Any]], raw_settings: dict[str, Any] | N
         }
 
     diagnosis = diagnose_measurements(points, settings, results)
+    attenuations = {item["index"]: item["loss"] for item in diagnosis["attenuations"]}
     for index, item in enumerate(results):
         item["suspectedInversion"] = index in diagnosis["inversions"]
+        item["suspectedAttenuation"] = attenuations.get(index)
     if diagnosis["divergent"]:
+        causes = []
+        if diagnosis["attenuations"]:
+            causes.append("atenuação no trecho")
+        if diagnosis["inversions"]:
+            causes.append("saídas invertidas")
         summary["status"] = "Sinal real divergente"
         summary["statusCopy"] = (
-            "Os sinais reais indicam saídas invertidas"
-            if diagnosis["inversions"]
+            f"Os sinais reais indicam {' e '.join(causes)}"
+            if causes
             else "Os sinais reais não batem com o projeto"
         )
+    recommendations = measurement_recommendations(points, settings, results, diagnosis) + [
+        item
+        for item in build_recommendations(points, settings, results)
+        # Com falha em campo, trocar splitter só mascararia o defeito
+        if not (diagnosis["divergent"] and item["title"].startswith("Comparar "))
+    ]
+    diagnosis.pop("scenario", None)
     return {
         "settings": settings,
         "results": results,
         "summary": summary,
         "diagnosis": diagnosis,
-        "recommendations": (
-            measurement_recommendations(points, results, diagnosis)
-            + build_recommendations(points, settings, results)
-        ),
+        "recommendations": recommendations,
         "materials": build_materials(points),
     }
 
