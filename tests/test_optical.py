@@ -3,6 +3,7 @@ import unittest
 from optical import (
     OpticalInputError,
     analyze_route,
+    build_field_report,
     build_recommendations,
     calculate_quick,
     calculate_route,
@@ -210,6 +211,31 @@ class CascadeDiagnosisTests(unittest.TestCase):
         titles = [item["title"] for item in analysis["recommendations"][:2]]
         self.assertIn("1º passo: Atenuação", titles[0])
         self.assertIn("2º passo: Problema local em SJL-CTO0378", titles[1])
+
+    def test_falha_em_campo_nao_diz_que_a_rota_esta_saudavel(self) -> None:
+        analysis = analyze_route(cascade_route(-19.73, -24, -23, -23, -21), CASCADE_SETTINGS)
+        titles = [item["title"] for item in analysis["recommendations"]]
+        self.assertNotIn("Estrutura dentro da margem configurada", titles)
+        self.assertIn("No projeto a rota fecha: a divergência é de campo", titles)
+        self.assertFalse(any("potência menor" in title or title.startswith("Comparar") for title in titles))
+
+    def test_relatorio_de_campo_lista_passos_em_ordem_e_sinais(self) -> None:
+        report = build_field_report(
+            cascade_route(-19.73, -24, -23, -23, -21), CASCADE_SETTINGS, "SJL 0382 a 0378", "10/11/2026"
+        )["text"]
+        self.assertTrue(report.startswith("*Relatório de campo · SJL 0382 a 0378*"))
+        self.assertIn("Data: 10/11/2026", report)
+        self.assertLess(report.index("1. Atenuação"), report.index("2. Possível inversão"))
+        self.assertNotIn("passo:", report)
+        self.assertIn("SJL-CTO0381 (15/85 + 1x8)", report)
+        self.assertIn("⚠ saídas invertidas?", report)
+        self.assertIn("SJL-CTO0378 (1x8)", report)
+
+    def test_relatorio_sem_medicoes_pede_os_sinais_reais(self) -> None:
+        report = build_field_report(cascade_route(*[None] * 5), CASCADE_SETTINGS)["text"]
+        self.assertIn("Cenário sem nome", report)
+        self.assertIn("Nenhum sinal real informado", report)
+        self.assertIn("não medido", report)
 
     def test_sem_explicacao_aponta_a_primeira_caixa_divergente(self) -> None:
         analysis = analyze_route(cascade_route(-19.7, -26, -18.4, -15, -22), CASCADE_SETTINGS)

@@ -69,7 +69,6 @@
 }
 :root[data-theme="dark"] .error-banner { color: #ffc2cd; background: #3b1620; border-color: #6b2a3b; border-left-color: #ff6b88; }
 
-
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html { scroll-behavior: smooth; color-scheme: light; }
@@ -82,7 +81,6 @@ input, select { width: 100%; min-height: 40px; padding: .55rem .65rem; color: va
 input:focus, select:focus { border-color: #a40d31; box-shadow: 0 0 0 3px rgba(164, 13, 49, .12); }
 
 .error-banner { position: fixed; z-index: 50; top: 18px; left: 50%; width: min(620px, calc(100% - 32px)); padding: 13px 16px; color: #741426; background: #fff0f1; border: 1px solid #e5a8b3; border-left: 4px solid #bb1e39; border-radius: 9px; box-shadow: 0 12px 35px rgba(23,33,43,.18); font-size: .86rem; transform: translateX(-50%); }
-
 
 .app-header { color: var(--on-accent); background: var(--header-bg); }
 .header-content { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .8rem; align-items: center; max-width: 1320px; margin: 0 auto; padding: .7rem 1.25rem; }
@@ -214,7 +212,7 @@ input:focus, select:focus { border-color: #a40d31; box-shadow: 0 0 0 3px rgba(16
 .capacity-metric strong { color: var(--accent-text); font-size: 1.05rem; }
 
 .primary-recommendation { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .3rem .7rem; align-items: start; padding: .75rem .85rem; border-color: var(--amber-line); background: var(--amber-surface); }
-.primary-recommendation .text-button { grid-column: 2; justify-self: start; }
+
 .recommendation-icon { display: grid; width: 24px; height: 24px; place-items: center; color: var(--on-accent); background: var(--amber); border-radius: 50%; font-family: Georgia, serif; font-weight: 800; }
 .primary-recommendation small, .primary-recommendation strong { display: block; }
 .primary-recommendation small { color: var(--amber); font-size: .62rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
@@ -266,8 +264,17 @@ input:focus, select:focus { border-color: #a40d31; box-shadow: 0 0 0 3px rgba(16
 
 footer { padding: 1.5rem 1rem 2.2rem; color: var(--muted); text-align: center; font-size: .68rem; }
 
-
 .heading-actions { display: flex; gap: 1rem; align-items: center; }
+.tools-menu { position: relative; }
+.tools-menu > summary { list-style: none; cursor: pointer; }
+.tools-menu > summary::-webkit-details-marker { display: none; }
+.tools-menu > summary::after { content: " ⌄"; }
+.tools-menu-list { position: absolute; z-index: 20; top: calc(100% + .4rem); right: 0; display: grid; width: 250px; padding: .3rem; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 30px rgba(23,33,43,.18); }
+.tools-menu-list button { display: grid; gap: .1rem; padding: .5rem .6rem; color: var(--ink); background: none; border: 0; border-radius: 7px; font-size: .8rem; font-weight: 750; text-align: left; }
+.tools-menu-list button:hover { background: var(--surface-muted); }
+.tools-menu-list small { color: var(--muted); font-size: .68rem; font-weight: 600; }
+.recommendation-actions { grid-column: 2; display: flex; flex-wrap: wrap; gap: .4rem 1rem; }
+.report-text { width: 100%; padding: .6rem .7rem; color: var(--ink); background: var(--surface-soft); border: 1px solid var(--line-strong); border-radius: 7px; font: .74rem/1.45 ui-monospace, Consolas, monospace; resize: vertical; }
 
 /* Gráfico de potência */
 .chart-card { padding: .75rem .9rem .6rem; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
@@ -348,6 +355,7 @@ footer { padding: 1.5rem 1rem 2.2rem; color: var(--muted); text-align: center; f
   .header-button { padding: .35rem .4rem; font-size: .7rem; }
   .app-main { padding: .75rem .6rem 1.5rem; }
   .section-heading { flex-direction: column; gap: .45rem; align-items: flex-start; }
+  .tools-menu-list { right: auto; left: 0; }
   .source-node { grid-template-columns: auto minmax(0, 1fr); }
   .power-field { grid-column: 1 / -1; grid-template-columns: auto minmax(0, 1fr); }
   .settings-grid, .quick-fields, .quick-results { grid-template-columns: 1fr; }

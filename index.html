@@ -24,7 +24,7 @@
     <link rel="icon" type="image/png" href="icons/icon-192.png" />
     <link rel="apple-touch-icon" href="icons/icon-192.png" />
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-    <link rel="stylesheet" href="styles.css?v=campo-3" />
+    <link rel="stylesheet" href="styles.css?v=campo-4" />
   </head>
   <body>
     <div id="app-error" class="error-banner" role="alert" hidden></div>
@@ -38,7 +38,7 @@
           <p>Monte a rota como ela existe em campo e acompanhe o sinal em cada ponto.</p>
         </div>
         <div class="header-actions">
-          <button class="header-button" type="button" id="open-quick">Consulta rápida</button>
+          <button class="header-button" type="button" id="open-report">Relatório de campo</button>
           <button class="header-button" type="button" id="share-project">Compartilhar cenário</button>
           <button class="header-button" type="button" id="new-project">Novo cenário</button>
           <button class="header-button theme-toggle" type="button" id="theme-toggle" aria-pressed="false">
@@ -73,7 +73,13 @@
             <p>Do DIO às CTOs, na ordem em que aparecem na rede.</p>
           </div>
           <div class="heading-actions">
-            <button class="text-button" type="button" id="open-optimizer">Otimizar splitters</button>
+            <details class="tools-menu" id="tools-menu">
+              <summary class="text-button">Ferramentas de projeto</summary>
+              <div class="tools-menu-list">
+                <button type="button" id="open-optimizer">Otimizar splitters<small>Equilibrar o sinal ao projetar uma rota</small></button>
+                <button type="button" id="open-quick">Consulta rápida<small>Saídas de um desbalanceado, sem montar rota</small></button>
+              </div>
+            </details>
             <button class="text-button" type="button" id="open-settings">Parâmetros técnicos</button>
           </div>
         </div>
@@ -150,7 +156,10 @@
           <strong id="primary-recommendation-title"></strong>
           <p id="primary-recommendation-body"></p>
         </div>
-        <button class="text-button" type="button" id="open-analysis">Ver detalhes</button>
+        <div class="recommendation-actions">
+          <button class="text-button" type="button" id="open-analysis">Ver detalhes</button>
+          <button class="text-button" type="button" id="open-report-inline">Gerar relatório de campo</button>
+        </div>
       </section>
 
       <details class="analysis-details" id="analysis-details">
@@ -237,6 +246,27 @@
       </form>
     </dialog>
 
+    <dialog class="app-dialog report-dialog" id="report-dialog">
+      <form method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">Equipe de campo</p>
+            <h2>Relatório de campo</h2>
+          </div>
+          <button class="close-button" value="cancel" aria-label="Fechar relatório">×</button>
+        </div>
+        <p class="share-description">
+          Passos na ordem da rota, sinais por caixa e parâmetros usados. Formatado para colar no WhatsApp.
+        </p>
+        <textarea id="report-text" class="report-text" readonly rows="14" aria-label="Texto do relatório"></textarea>
+        <div class="dialog-buttons">
+          <button class="secondary-button" type="button" id="share-report" hidden>Enviar</button>
+          <button class="primary-button" type="button" id="copy-report">Copiar relatório</button>
+        </div>
+        <p class="copy-status" id="report-status" role="status" aria-live="polite"></p>
+      </form>
+    </dialog>
+
     <dialog class="app-dialog optimize-dialog" id="optimize-dialog">
       <form method="dialog">
         <div class="dialog-heading">
@@ -265,6 +295,6 @@
 
     <footer>Protótipo inicial · Confirme as perdas com os fabricantes homologados antes do uso em campo.</footer>
     <script src="https://cdn.jsdelivr.net/pyodide/v314.0.2/full/pyodide.js"></script>
-    <script src="app.js?v=campo-3"></script>
+    <script src="app.js?v=campo-4"></script>
   </body>
 </html>

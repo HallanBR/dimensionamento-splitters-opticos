@@ -6,9 +6,10 @@ interfaces e futuramente integrado ao sistema de solicitação de materiais.
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
-from statistics import median
 from dataclasses import dataclass
+from statistics import median
 from typing import Any
 
 
@@ -536,7 +537,9 @@ def build_recommendations(
     points: list[dict[str, Any]],
     settings: dict[str, Any],
     results: list[dict[str, Any]],
+    field_fault: bool = False,
 ) -> list[dict[str, str]]:
+    """Recomendações do projeto. Com falha em campo, só o que não mascara o defeito."""
     if not results:
         return []
 
@@ -544,7 +547,19 @@ def build_recommendations(
     critical = min(results, key=lambda item: item["effectiveMargin"])
     recommendations: list[dict[str, str]] = []
 
-    if score["minimum"] < 0:
+    if field_fault and score["minimum"] >= 0:
+        recommendations.append(
+            {
+                "level": "informative",
+                "title": "No projeto a rota fecha: a divergência é de campo",
+                "body": (
+                    f"Pelo cálculo, o ponto mais restritivo teria {score['minimum']:.2f} dB além da margem "
+                    "de segurança. Os sinais reais abaixo disso vêm de falha na rede, não do dimensionamento. "
+                    "Trate as falhas antes de trocar splitters ou mexer na potência."
+                ),
+            }
+        )
+    elif score["minimum"] < 0:
         recommendations.append(
             {
                 "level": "required",
@@ -574,6 +589,10 @@ def build_recommendations(
                 "body": f"O ponto mais restritivo ainda possui {score['minimum']:.2f} dB além da margem de segurança.",
             }
         )
+
+    # Com falha em campo, reduzir potência ou trocar splitter só mascararia o defeito
+    if field_fault:
+        return recommendations
 
     if score["minimum"] >= 5:
         suggested_reduction = int((score["minimum"] - 3) * 10) / 10
@@ -681,20 +700,69 @@ def analyze_route(points: list[dict[str, Any]], raw_settings: dict[str, Any] | N
             if causes
             else "Os sinais reais não batem com o projeto"
         )
-    recommendations = measurement_recommendations(points, settings, results, diagnosis) + [
-        item
-        for item in build_recommendations(points, settings, results)
-        # Com falha em campo, trocar splitter só mascararia o defeito
-        if not (diagnosis["divergent"] and item["title"].startswith("Comparar "))
-    ]
+    field_steps = measurement_recommendations(points, settings, results, diagnosis)
+    recommendations = field_steps + build_recommendations(
+        points, settings, results, field_fault=bool(diagnosis["divergent"])
+    )
     diagnosis.pop("scenario", None)
     return {
         "settings": settings,
         "results": results,
         "summary": summary,
         "diagnosis": diagnosis,
+        "fieldSteps": field_steps,
         "recommendations": recommendations,
     }
+
+
+def build_field_report(
+    points: list[dict[str, Any]],
+    raw_settings: dict[str, Any] | None,
+    name: str = "",
+    date: str = "",
+) -> dict[str, str]:
+    """Monta o relatório da rota para a equipe de campo, pronto para colar no WhatsApp."""
+    analysis = analyze_route(points, raw_settings)
+    settings, summary, results = analysis["settings"], analysis["summary"], analysis["results"]
+    lines = [f"*Relatório de campo · {name.strip() or 'Cenário sem nome'}*"]
+    if date:
+        lines.append(f"Data: {date}")
+    lines += [f"Situação: {summary['status']} ({summary['statusCopy']})", ""]
+
+    if analysis["fieldSteps"]:
+        lines.append("*O que fazer, nesta ordem:*")
+        for number, step in enumerate(analysis["fieldSteps"], start=1):
+            lines.append(f"{number}. {re.sub(r'^[0-9]+º passo: ', '', step['title'])}")
+            lines.append(f"   {step['body']}")
+    elif any(item["measured"] is not None for item in results):
+        lines.append("Os sinais reais batem com o projeto. Nenhuma falha de campo identificada.")
+    else:
+        lines.append("Nenhum sinal real informado. Meça o melhor cliente de cada caixa para o diagnóstico.")
+
+    lines += ["", "*Sinais por caixa* (projetado · real)"]
+    for number, item in enumerate(results, start=1):
+        parts = [item["splitter"], item["balanced"] if item["balanced"] != "Sem splitter" else ""]
+        real = (
+            f"{item['measured']:.2f} dBm (Δ {_signed(item['measuredDelta'])} dB)"
+            if item["measured"] is not None
+            else "não medido"
+        )
+        flags = ""
+        if item.get("suspectedAttenuation") is not None:
+            flags += f" ⚠ atenuação antes (~{item['suspectedAttenuation']:.1f} dB)"
+        if item.get("suspectedInversion"):
+            flags += " ⚠ saídas invertidas?"
+        lines.append(
+            f"{number}. {item['name']} ({' + '.join(part for part in parts if part)}): "
+            f"{item['local']:.2f} dBm · {real}{flags}"
+        )
+
+    lines += [
+        "",
+        f"Origem {settings['sourcePower']:.1f} dBm · limite {settings['minimumPower']:.1f} dBm · "
+        f"margem {settings['safetyMargin']:.1f} dB",
+    ]
+    return {"text": "\n".join(lines)}
 
 
 def calculate_quick(input_power: Any, ratio: str) -> dict[str, float]:
