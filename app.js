@@ -503,7 +503,6 @@ function renderAnalysis(analysis) {
   renderSummary(analysis.summary, analysis.results, analysis.diagnosis);
   renderChart(analysis.results, analysis.settings);
   renderRecommendations(analysis.recommendations);
-  renderMaterials(analysis.materials);
 }
 
 function deltaState(delta) {
@@ -673,17 +672,6 @@ function renderRecommendations(recommendations) {
   byId("recommendations-list").innerHTML = recommendations
     .map((item) => `<article class="recommendation ${item.level}"><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.body)}</p></article>`)
     .join("");
-}
-
-function renderMaterials(materials) {
-  const total = materials.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-  byId("materials-count").textContent = `${total} ${total === 1 ? "item" : "itens"}`;
-  byId("materials-list").innerHTML = materials.length
-    ? materials.map((item) => {
-      const suffix = item.code ? ` · cód. ${item.code}` : "";
-      return `<span class="material-chip">${item.quantity}× Splitter ${escapeHtml(item.name)}${suffix}</span>`;
-    }).join("")
-    : '<p class="details-empty">Os materiais aparecerão conforme você adicionar pontos.</p>';
 }
 
 async function openOptimizer() {
