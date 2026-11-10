@@ -27,9 +27,8 @@ A versão hospedada executa o motor Python diretamente no navegador por WebAssem
 - otimizador opcional de desbalanceados, que só altera a rota quando a sugestão é aplicada;
 - modo noturno;
 - instalação como aplicativo no celular, com cache do motor Python para abrir mais rápido e funcionar sem internet;
-- resumo inicial de materiais;
 - recomendações explicadas para pontos críticos, potência de origem e alternativas de splitter;
-- motor óptico, recomendações e materiais processados em Python;
+- motor óptico e recomendações processados em Python;
 - JavaScript restrito à interface e à ponte com o motor Python;
 - funcionamento sem banco de dados e sem autenticação.
 

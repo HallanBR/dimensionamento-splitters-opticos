@@ -57,11 +57,11 @@ class OpticalCalculatorTests(unittest.TestCase):
         recommendations = build_recommendations(points, SETTINGS, results)
         self.assertTrue(any("potência menor" in item["title"] for item in recommendations))
 
-    def test_analise_retorna_resultado_resumo_e_materiais(self) -> None:
+    def test_analise_retorna_resultado_e_resumo(self) -> None:
         points = [{"name": "CTO", "distance": 1, "splices": 2, "splitter": "10/90", "balanced": "1x8"}]
         analysis = analyze_route(points, SETTINGS)
         self.assertEqual(analysis["summary"]["criticalPoint"], "CTO")
-        self.assertEqual(analysis["materials"][0]["code"], 1843)
+        self.assertNotIn("materials", analysis)
         self.assertEqual(len(analysis["results"]), 1)
 
     def test_ultima_caixa_pode_ter_apenas_splitter_local(self) -> None:
@@ -74,9 +74,6 @@ class OpticalCalculatorTests(unittest.TestCase):
         self.assertAlmostEqual(result["local"], -8.05)
         self.assertIsNone(result["pass"])
         self.assertIsNone(result["splitterData"])
-        self.assertEqual(analysis["materials"], [
-            {"type": "balanceado", "name": "1x8", "quantity": 1, "code": None}
-        ])
 
     def test_caixa_sem_desbalanceado_deve_ser_a_ultima(self) -> None:
         points = [
@@ -96,10 +93,6 @@ class OpticalCalculatorTests(unittest.TestCase):
         self.assertAlmostEqual(results[0]["pass"], 1.45)
         self.assertAlmostEqual(results[1]["input"], 0.65)
         self.assertAlmostEqual(results[1]["local"], -9.85)
-        self.assertEqual(analysis["materials"], [
-            {"type": "desbalanceado", "name": "10/90", "quantity": 1, "code": 1843},
-            {"type": "balanceado", "name": "1x8", "quantity": 2, "code": None},
-        ])
 
     def test_soma_capacidade_dos_splitters_de_clientes(self) -> None:
         points = [

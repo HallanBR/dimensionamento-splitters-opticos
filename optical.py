@@ -624,30 +624,6 @@ def build_recommendations(
     return recommendations
 
 
-def build_materials(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    counts: dict[tuple[str, str], int] = {}
-    for point in points:
-        ratio = str(point.get("splitter") or "")
-        if ratio:
-            counts[("desbalanceado", ratio)] = counts.get(("desbalanceado", ratio), 0) + 1
-        balanced = str(point.get("balanced") or "Sem splitter")
-        if balanced != "Sem splitter":
-            counts[("balanceado", balanced)] = counts.get(("balanceado", balanced), 0) + 1
-
-    materials = []
-    for (kind, name), quantity in counts.items():
-        splitter = next((item for item in SPLITTERS if item.ratio == name), None)
-        materials.append(
-            {
-                "type": kind,
-                "name": name,
-                "quantity": quantity,
-                "code": splitter.code if splitter else None,
-            }
-        )
-    return materials
-
-
 def analyze_route(points: list[dict[str, Any]], raw_settings: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(points, list):
         raise OpticalInputError("A estrutura da rota deve ser uma lista de pontos.")
@@ -718,7 +694,6 @@ def analyze_route(points: list[dict[str, Any]], raw_settings: dict[str, Any] | N
         "summary": summary,
         "diagnosis": diagnosis,
         "recommendations": recommendations,
-        "materials": build_materials(points),
     }
 
 
