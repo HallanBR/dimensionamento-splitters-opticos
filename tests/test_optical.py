@@ -302,6 +302,91 @@ class WrongSplitterTests(unittest.TestCase):
         self.assertEqual(analysis["diagnosis"]["wrongSplitters"], [])
 
 
+VPN_0417_MEASURED = (-19.6, -20.6, -20.8, -18.9, -21.7, -26.6, -24, -24.7, -26.6)
+
+
+def vpn_0417_route(last: float | None = None) -> list[dict]:
+    """Rota real da VPN 0417 → 0408, que já nasce abaixo do limite na última caixa."""
+    boxes = [
+        ("VPN-CTO0417", "10/90", "1x8"),
+        ("VPN-CTO0416", "10/90", "1x8"),
+        ("VPN-CTO0415", "10/90", "1x8"),
+        ("VPN-CTO0414", "20/80", "1x8"),
+        ("VPN-CTO0413", "30/70", "1x16"),
+        ("VPN-CTO0412", "30/70", "1x16"),
+        ("VPN-CTO0411", "40/60", "1x8"),
+        ("VPN-CTO0410", "40/60", "1x8"),
+        ("VPN-CTO0409", "40/60", "1x8"),
+        ("VPN-CTO0408", "", "1x16"),
+    ]
+    return [
+        {"name": name, "distance": 0, "splices": 0, "splitter": ratio, "balanced": balanced, "measured": value}
+        for (name, ratio, balanced), value in zip(boxes, VPN_0417_MEASURED + (last,))
+    ]
+
+
+class DesignAndReadingTests(unittest.TestCase):
+    def test_sinais_que_batem_com_o_projeto_apontam_problema_de_projeto(self) -> None:
+        analysis = analyze_route(vpn_0417_route(), SETTINGS)
+        self.assertEqual(analysis["diagnosis"]["divergent"], [])
+        self.assertEqual(analysis["recommendations"][0]["title"], "A rede está como projetada: o problema é o projeto")
+        self.assertIn("confirmam", analysis["summary"]["statusCopy"])
+
+    def test_sem_sinais_reais_mantem_a_revisao_do_projeto(self) -> None:
+        route = [dict(point, measured=None) for point in vpn_0417_route()]
+        analysis = analyze_route(route, SETTINGS)
+        self.assertTrue(analysis["recommendations"][0]["title"].startswith("Revisar o atendimento"))
+
+    def test_leitura_impossivel_fica_fora_do_diagnostico(self) -> None:
+        analysis = analyze_route(vpn_0417_route(-4.3), SETTINGS)
+        last = analysis["results"][-1]
+        self.assertTrue(last["impossibleReading"])
+        self.assertTrue(last["overload"])
+        self.assertEqual(analysis["diagnosis"]["divergent"], [])
+        first = analysis["recommendations"][0]
+        self.assertEqual(first["title"], "Leitura impossível em VPN-CTO0408: -4.3 dBm")
+        self.assertIn("atenuador", first["body"])
+        self.assertEqual(analysis["recommendations"][1]["title"], "A rede está como projetada: o problema é o projeto")
+
+    def test_sinal_forte_demais_sem_ser_impossivel(self) -> None:
+        route = [{"name": "CTO", "distance": 0, "splices": 0, "splitter": "", "balanced": "1x2", "measured": -6.5}]
+        analysis = analyze_route(route, {**SETTINGS, "sourcePower": -2})
+        result = analysis["results"][0]
+        self.assertTrue(result["overload"])
+        self.assertFalse(result["impossibleReading"])
+        self.assertIn("Sinal forte demais em CTO", analysis["recommendations"][0]["title"])
+
+    def test_relatorio_marca_leitura_impossivel(self) -> None:
+        report = build_field_report(vpn_0417_route(-4.3), SETTINGS)["text"]
+        self.assertIn("⚠ leitura impossível", report)
+
+
+class SourceEstimateTests(unittest.TestCase):
+    def shifted_route(self, offset: float) -> list[dict]:
+        route = [dict(point, measured=None) for point in vpn_0417_route()]
+        for point, result in zip(route, calculate_route(route, SETTINGS)):
+            point["measured"] = round(result["local"] + offset, 1)
+        return route
+
+    def test_origem_mais_forte_que_a_informada(self) -> None:
+        analysis = analyze_route(self.shifted_route(2.5), SETTINGS)
+        self.assertEqual(analysis["sourceEstimate"]["value"], SETTINGS["sourcePower"] + 2.5)
+        estimate = next(item for item in analysis["recommendations"] if "action" in item)
+        self.assertEqual(estimate["action"]["sourcePower"], SETTINGS["sourcePower"] + 2.5)
+
+    def test_origem_mais_fraca_nao_desconta_a_perda_duas_vezes(self) -> None:
+        analysis = analyze_route(self.shifted_route(-4), SETTINGS)
+        self.assertEqual([item["index"] for item in analysis["diagnosis"]["attenuations"]], [0])
+        self.assertEqual(analysis["sourceEstimate"]["value"], SETTINGS["sourcePower"] - 4)
+        self.assertIn("OLT saindo com menos sinal", analysis["recommendations"][0]["body"])
+
+    def test_diferenca_pequena_nao_sugere_trocar_a_origem(self) -> None:
+        self.assertIsNone(analyze_route(vpn_0417_route(), SETTINGS)["sourceEstimate"])
+
+    def test_atenuacao_no_meio_usa_so_as_caixas_antes_dela(self) -> None:
+        self.assertIsNone(analyze_route(vpn_route(*VPN_MEASURED), VPN_SETTINGS)["sourceEstimate"])
+
+
 class OptimizerTests(unittest.TestCase):
     def test_otimizador_melhora_a_menor_margem(self) -> None:
         result = optimize_splitters(field_route(), FIELD_SETTINGS)

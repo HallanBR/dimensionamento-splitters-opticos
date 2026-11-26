@@ -380,6 +380,7 @@ function renderPoints() {
                 <span class="inversion-flag" data-output="attenuation" hidden>Atenuação antes?</span>
                 <span class="inversion-flag" data-output="inversion" hidden>Saídas invertidas?</span>
                 <span class="inversion-flag" data-output="wrong-splitter" hidden></span>
+                <span class="inversion-flag" data-output="reading" hidden></span>
               </div>
               <label class="splitter-core">
                 <span data-output="splitter-label">${point.splitter ? "Desbalanceado" : "Final da rota"}</span>
@@ -554,9 +555,13 @@ function patchRouteOutputs(results) {
     const wrongSplitter = node.querySelector('[data-output="wrong-splitter"]');
     wrongSplitter.hidden = !result.suspectedSplitter;
     if (result.suspectedSplitter) wrongSplitter.textContent = `Desbalanceado é ${result.suspectedSplitter}?`;
+    const reading = node.querySelector('[data-output="reading"]');
+    reading.hidden = !result.impossibleReading && !result.overload;
+    reading.textContent = result.impossibleReading ? "Leitura impossível" : "Sinal forte demais";
     node.classList.toggle(
       "is-suspect",
-      Boolean(result.suspectedInversion) || Boolean(result.suspectedSplitter) || suspectedAttenuation !== null,
+      Boolean(result.suspectedInversion) || Boolean(result.suspectedSplitter) || suspectedAttenuation !== null
+        || Boolean(result.impossibleReading) || Boolean(result.overload),
     );
   });
 }
@@ -671,6 +676,13 @@ function renderChart(results, settings) {
 
 function renderRecommendations(recommendations) {
   const primary = byId("primary-recommendation");
+  const estimate = recommendations.find((item) => item.action?.sourcePower !== undefined);
+  const applyEstimate = byId("apply-source-estimate");
+  applyEstimate.hidden = !estimate;
+  if (estimate) {
+    applyEstimate.textContent = `${estimate.action.label} na origem`;
+    applyEstimate.dataset.value = estimate.action.sourcePower;
+  }
   if (!recommendations.length) {
     primary.hidden = true;
     byId("recommendations-count").textContent = "0 sugestões";
@@ -924,6 +936,11 @@ function registerEvents() {
   });
   byId("open-report").addEventListener("click", openReport);
   byId("open-report-inline").addEventListener("click", openReport);
+  byId("apply-source-estimate").addEventListener("click", (event) => {
+    const input = byId("source-power");
+    input.value = event.currentTarget.dataset.value;
+    input.dispatchEvent(new Event("input"));
+  });
   byId("copy-report").addEventListener("click", copyReport);
   byId("share-report").addEventListener("click", shareReport);
   byId("open-optimizer").addEventListener("click", openOptimizer);

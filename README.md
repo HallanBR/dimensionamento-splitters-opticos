@@ -22,6 +22,9 @@ A versão hospedada executa o motor Python diretamente no navegador por WebAssem
 - compartilhamento do cenário completo por link comprimido, sem banco de dados (links antigos continuam abrindo);
 - edição direta na linha de cada caixa, inserção de caixas no meio da rota e exclusão com opção de desfazer;
 - sinal real do melhor cliente de cada caixa, com diferença para o projetado e diagnóstico de atenuação em trecho, de saídas de desbalanceado invertidas e de desbalanceado instalado diferente do cadastro, em passos na ordem da rota;
+- aviso de leitura impossível (sinal maior do que a caixa consegue entregar, que fica fora do diagnóstico) e de sinal forte demais para a ONU (acima de -8 dBm);
+- quando os sinais reais batem com o cálculo e a rota não fecha, o assistente avisa que o problema é o projeto, não uma falha de campo;
+- estimativa da potência real da origem pelos sinais medidos, com botão para usar o valor estimado;
 - relatório de campo pronto para copiar ou enviar pelo WhatsApp, com os passos, os sinais por caixa e os parâmetros usados;
 - gráfico da potência projetada e do sinal real ao longo da rota;
 - ferramentas de projeto em um menu à parte: otimizador de desbalanceados (só altera a rota quando a sugestão é aplicada) e consulta rápida de atenuação;
