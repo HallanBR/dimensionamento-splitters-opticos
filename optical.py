@@ -235,6 +235,67 @@ MAX_HYPOTHESES = 4
 WRONG_SPLITTER_TOLERANCE = 2.0
 # Com seis modelos possíveis por caixa, o cadastro errado explica quase tudo; só vence com folga
 WRONG_SPLITTER_PENALTY = 3.0
+# Maior saída usual de uma PON GPON (classe C+): acima disso nenhuma caixa recebe mais sinal
+MAX_SOURCE_POWER = 7.0
+IMPOSSIBLE_TOLERANCE = 3.0
+# Acima disso a ONU satura e pode ser danificada
+OVERLOAD_POWER = -8.0
+SOURCE_ESTIMATE_MIN_DIFF = 1.0
+
+
+def check_readings(results: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
+    """Separa sinais reais que a caixa não consegue entregar e sinais fortes demais para a ONU."""
+    headroom = max(0.0, MAX_SOURCE_POWER - settings["sourcePower"])
+    readings = []
+    for index, item in enumerate(results):
+        if item["measured"] is None:
+            continue
+        maximum = item["local"] + headroom
+        impossible = item["measured"] > maximum + IMPOSSIBLE_TOLERANCE
+        overload = item["measured"] > OVERLOAD_POWER
+        if impossible or overload:
+            readings.append(
+                {
+                    "index": index,
+                    "measured": item["measured"],
+                    "maximum": maximum,
+                    "impossible": impossible,
+                    "overload": overload,
+                }
+            )
+    return readings
+
+
+def estimate_source(
+    settings: dict[str, Any],
+    results: list[dict[str, Any]],
+    diagnosis: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Estima a potência real da origem pelos sinais reais que não têm falha diagnosticada.
+
+    Todas as caixas variam junto com a origem, então a mediana dos desvios das caixas antes
+    da primeira falha mostra quanto a origem está acima ou abaixo do informado. Uma
+    atenuação logo na primeira caixa não se separa de uma origem mais fraca: nesse caso
+    ela entra na estimativa.
+    """
+    attenuations = {item["index"]: item["loss"] for item in diagnosis["attenuations"]}
+    faults = (
+        list(attenuations)
+        + diagnosis["inversions"]
+        + [item["index"] for item in diagnosis["wrongSplitters"]]
+        + [item["index"] for item in diagnosis["localIssues"]]
+    )
+    if 0 in attenuations:
+        faults.remove(0)
+    unexplained = [] if faults or attenuations else diagnosis["divergent"]
+    limit = min(faults + unexplained + [len(results)])
+    deltas = [item["measuredDelta"] for item in results[:limit] if item["measuredDelta"] is not None]
+    if len(deltas) < 2:
+        return None
+    value = round(settings["sourcePower"] + median(deltas), 1)
+    if abs(value - settings["sourcePower"]) < SOURCE_ESTIMATE_MIN_DIFF:
+        return None
+    return {"value": value, "samples": len(deltas)}
 
 
 def _residuals(points: list[dict[str, Any]], settings: dict[str, Any]) -> list[float | None]:
@@ -397,133 +458,162 @@ def measurement_recommendations(
 ) -> list[dict[str, str]]:
     """Monta os passos de tratamento em campo, sempre na ordem da rota (da origem ao fim)."""
     faults = (
-        [("attenuation", item["index"], item) for item in diagnosis["attenuations"]]
+        [("reading", item["index"], item) for item in diagnosis.get("readings", [])]
+        + [("attenuation", item["index"], item) for item in diagnosis["attenuations"]]
         + [("inversion", index, None) for index in diagnosis["inversions"]]
         + [("splitter", item["index"], item) for item in diagnosis["wrongSplitters"]]
         + [("local", item["index"], item) for item in diagnosis["localIssues"]]
     )
-    if faults:
-        order = ["attenuation", "inversion", "splitter", "local"]
-        faults.sort(key=lambda fault: (fault[1], order.index(fault[0])))
-        scenario = diagnosis["scenario"]
-        fitted = calculate_route(scenario, settings)
-        recommendations = []
-        for step, (kind, index, data) in enumerate(faults, start=1):
-            name = results[index]["name"]
-            prefix = f"{step}º passo: " if len(faults) > 1 else ""
-            if kind == "attenuation":
-                previous = results[index - 1]["name"] if index else "a origem"
-                downstream = [item["name"] for item in results[index:] if item["measured"] is not None]
-                expected = (
-                    f"Meça a continuidade de {previous} (esperado {results[index - 1]['pass']:.1f} dBm) "
-                    if index
-                    else "Meça a saída da origem "
-                )
-                unmeasured = (
-                    f" Como {previous} não tem sinal real, a perda também pode estar antes dela."
-                    if index and results[index - 1]["measured"] is None
-                    else ""
-                )
-                recommendations.append(
-                    {
-                        "level": "required",
-                        "title": f"{prefix}Atenuação de cerca de {data['loss']:.1f} dB entre {previous} e {name}",
-                        "body": (
-                            f"Os sinais reais de {_place(downstream)} estão todos cerca de {data['loss']:.1f} dB "
-                            f"abaixo do projeto. A perda está no trecho que chega a {name}: saída de "
-                            f"continuidade, cabo ou fusões. {expected}e a entrada de {name} "
-                            f"(esperado {results[index]['input']:.1f} dBm; com a falha deve dar perto de "
-                            f"{fitted[index]['input']:.1f} dBm).{unmeasured} Trate este trecho antes das "
-                            "caixas seguintes, que só herdam a perda."
-                        ),
-                    }
-                )
-            elif kind == "inversion":
-                item = fitted[index]
-                splitter = get_splitter(item["splitter"])
-                local_share, pass_share = item["splitter"].split("/")
+    explained = len(faults) > len(diagnosis.get("readings", []))
+    if diagnosis["divergent"] and not explained:
+        faults.append(("divergent", diagnosis["divergent"][0], None))
+    if not faults:
+        return []
+    order = ["reading", "attenuation", "inversion", "splitter", "local", "divergent"]
+    faults.sort(key=lambda fault: (fault[1], order.index(fault[0])))
+    scenario = diagnosis.get("scenario", points)
+    fitted = calculate_route(scenario, settings)
+    recommendations = []
+    for step, (kind, index, data) in enumerate(faults, start=1):
+        name = results[index]["name"]
+        prefix = f"{step}º passo: " if len(faults) > 1 else ""
+        if kind == "reading":
+            overload = (
+                f"Acima de {OVERLOAD_POWER:.0f} dBm a ONU satura e pode queimar: se o power meter confirmar, "
+                "coloque um atenuador antes dela."
+            )
+            if data["impossible"]:
+                title = f"Leitura impossível em {name}: {data['measured']:.1f} dBm"
                 body = (
-                    "Os sinais reais batem com a porta de clientes ligada na continuidade e vice-versa. "
-                    f"Com cerca de {item['input']:.1f} dBm na entrada, ligado certo a porta de "
-                    f"{int(local_share)}% (clientes) dá {item['input'] - splitter.local_loss:.1f} dBm e a de "
-                    f"{int(pass_share)}% (continuidade) dá {item['input'] - splitter.pass_loss:.1f} dBm; "
-                    "invertido, dá o contrário."
+                    f"Nem com a origem no máximo ({max(MAX_SOURCE_POWER, settings['sourcePower']):.0f} dBm) "
+                    f"esta caixa passaria de {data['maximum']:.1f} dBm. Ou a leitura da ONU está errada, ou o "
+                    "cliente está ligado em outro lugar, sem passar pelo splitter desta caixa. Peça uma nova "
+                    "leitura na OLT e meça com o power meter no drop. Este sinal ficou fora do diagnóstico "
+                    "da rota."
                 )
-                upstream = [att for att in diagnosis["attenuations"] if att["index"] < index]
-                if upstream:
-                    trial = deepcopy(scenario)
-                    trial[index]["inverted"] = False
-                    after = calculate_route(trial, settings)[index]
-                    if after["effectiveMargin"] < 0:
-                        origin = results[upstream[0]["index"]]["name"]
-                        body += (
-                            f" Só desfaça a inversão depois de corrigir a atenuação antes de {origin}: "
-                            f"antes disso os clientes de {name} cairiam para cerca de {after['local']:.1f} dBm."
-                        )
-                recommendations.append(
-                    {
-                        "level": "required",
-                        "title": f"{prefix}Possível inversão das saídas do {item['splitter']} em {name}",
-                        "body": body,
-                    }
-                )
-            elif kind == "splitter":
-                input_power = fitted[index]["input"]
-                registered, likely = get_splitter(data["registered"]), get_splitter(data["likely"])
-                options = f"um {data['likely']}" + (
-                    f" (ou {' ou '.join(data['alternatives'])})" if data["alternatives"] else ""
-                )
-                recommendations.append(
-                    {
-                        "level": "required",
-                        "title": f"{prefix}O desbalanceado de {name} pode não ser {data['registered']}",
-                        "body": (
-                            f"Com {data['registered']}, os sinais de {name} e das caixas seguintes não fecham. "
-                            f"Com {options} no lugar, a rota inteira é explicada. Com cerca de "
-                            f"{input_power:.1f} dBm na entrada, meça as duas saídas: um {data['registered']} dá "
-                            f"{input_power - registered.local_loss:.1f} dBm na porta de clientes e "
-                            f"{input_power - registered.pass_loss:.1f} dBm na continuidade; um {data['likely']} dá "
-                            f"{input_power - likely.local_loss:.1f} e {input_power - likely.pass_loss:.1f} dBm. "
-                            "Se confirmar, corrija o cadastro antes de usar o otimizador. Se as saídas baterem "
-                            f"com {data['registered']}, o problema está no splitter de clientes ou nos "
-                            "conectores desta caixa."
-                        ),
-                    }
-                )
+                if data["overload"]:
+                    body += f" {overload}"
             else:
-                recommendations.append(
-                    {
-                        "level": "required",
-                        "title": f"{prefix}Problema local em {name}",
-                        "body": (
-                            f"Mesmo considerando as outras falhas, o melhor cliente está {_signed(data['delta'])} dB "
-                            "fora do esperado e as caixas seguintes não acompanham. Revise o splitter de "
-                            "clientes, os conectores e o drop desta caixa."
-                        ),
-                    }
-                )
-        return recommendations
-    if diagnosis["divergent"]:
-        first = results[diagnosis["divergent"][0]]
-        others = [results[index]["name"] for index in diagnosis["divergent"][1:]]
-        extra = (
-            f" {_place(others)} também {'divergem' if len(others) > 1 else 'diverge'}; trate {first['name']} "
-            "primeiro, porque um problema no início da rota se repete nas caixas seguintes."
-            if others
-            else ""
-        )
-        return [
-            {
-                "level": "required",
-                "title": f"Sinal real divergente a partir de {first['name']}",
-                "body": (
-                    f"Melhor cliente com {first['measured']:.2f} dBm, projetado {first['local']:.2f} dBm "
-                    f"({_signed(first['measuredDelta'])} dB). Revise conectores, fusões, distância "
-                    f"levantada e a ligação dos splitters.{extra}"
-                ),
-            }
-        ]
-    return []
+                title = f"Sinal forte demais em {name}: {data['measured']:.1f} dBm"
+                body = f"{overload} Confira também se o cliente está mesmo ligado no splitter desta caixa."
+            recommendations.append({"level": "required", "title": f"{prefix}{title}", "body": body})
+        elif kind == "attenuation":
+            previous = results[index - 1]["name"] if index else "a origem"
+            downstream = [item["name"] for item in results[index:] if item["measured"] is not None]
+            expected = (
+                f"Meça a continuidade de {previous} (esperado {results[index - 1]['pass']:.1f} dBm) "
+                if index
+                else "Meça a saída da origem "
+            )
+            unmeasured = (
+                f" Como {previous} não tem sinal real, a perda também pode estar antes dela."
+                if index and results[index - 1]["measured"] is None
+                else ""
+            )
+            source = (
+                " Se a potência da origem foi estimada, essa diferença pode ser só a OLT saindo com menos sinal."
+                if not index
+                else ""
+            )
+            recommendations.append(
+                {
+                    "level": "required",
+                    "title": f"{prefix}Atenuação de cerca de {data['loss']:.1f} dB entre {previous} e {name}",
+                    "body": (
+                        f"Os sinais reais de {_place(downstream)} estão todos cerca de {data['loss']:.1f} dB "
+                        f"abaixo do projeto. A perda está no trecho que chega a {name}: saída de "
+                        f"continuidade, cabo ou fusões. {expected}e a entrada de {name} "
+                        f"(esperado {results[index]['input']:.1f} dBm; com a falha deve dar perto de "
+                        f"{fitted[index]['input']:.1f} dBm).{unmeasured}{source} Trate este trecho antes das "
+                        "caixas seguintes, que só herdam a perda."
+                    ),
+                }
+            )
+        elif kind == "inversion":
+            item = fitted[index]
+            splitter = get_splitter(item["splitter"])
+            local_share, pass_share = item["splitter"].split("/")
+            body = (
+                "Os sinais reais batem com a porta de clientes ligada na continuidade e vice-versa. "
+                f"Com cerca de {item['input']:.1f} dBm na entrada, ligado certo a porta de "
+                f"{int(local_share)}% (clientes) dá {item['input'] - splitter.local_loss:.1f} dBm e a de "
+                f"{int(pass_share)}% (continuidade) dá {item['input'] - splitter.pass_loss:.1f} dBm; "
+                "invertido, dá o contrário."
+            )
+            upstream = [att for att in diagnosis["attenuations"] if att["index"] < index]
+            if upstream:
+                trial = deepcopy(scenario)
+                trial[index]["inverted"] = False
+                after = calculate_route(trial, settings)[index]
+                if after["effectiveMargin"] < 0:
+                    origin = results[upstream[0]["index"]]["name"]
+                    body += (
+                        f" Só desfaça a inversão depois de corrigir a atenuação antes de {origin}: "
+                        f"antes disso os clientes de {name} cairiam para cerca de {after['local']:.1f} dBm."
+                    )
+            recommendations.append(
+                {
+                    "level": "required",
+                    "title": f"{prefix}Possível inversão das saídas do {item['splitter']} em {name}",
+                    "body": body,
+                }
+            )
+        elif kind == "splitter":
+            input_power = fitted[index]["input"]
+            registered, likely = get_splitter(data["registered"]), get_splitter(data["likely"])
+            options = f"um {data['likely']}" + (
+                f" (ou {' ou '.join(data['alternatives'])})" if data["alternatives"] else ""
+            )
+            recommendations.append(
+                {
+                    "level": "required",
+                    "title": f"{prefix}O desbalanceado de {name} pode não ser {data['registered']}",
+                    "body": (
+                        f"Com {data['registered']}, os sinais de {name} e das caixas seguintes não fecham. "
+                        f"Com {options} no lugar, a rota inteira é explicada. Com cerca de "
+                        f"{input_power:.1f} dBm na entrada, meça as duas saídas: um {data['registered']} dá "
+                        f"{input_power - registered.local_loss:.1f} dBm na porta de clientes e "
+                        f"{input_power - registered.pass_loss:.1f} dBm na continuidade; um {data['likely']} dá "
+                        f"{input_power - likely.local_loss:.1f} e {input_power - likely.pass_loss:.1f} dBm. "
+                        "Se confirmar, corrija o cadastro antes de usar o otimizador. Se as saídas baterem "
+                        f"com {data['registered']}, o problema está no splitter de clientes ou nos "
+                        "conectores desta caixa."
+                    ),
+                }
+            )
+        elif kind == "local":
+            recommendations.append(
+                {
+                    "level": "required",
+                    "title": f"{prefix}Problema local em {name}",
+                    "body": (
+                        f"Mesmo considerando as outras falhas, o melhor cliente está {_signed(data['delta'])} dB "
+                        "fora do esperado e as caixas seguintes não acompanham. Revise o splitter de "
+                        "clientes, os conectores e o drop desta caixa."
+                    ),
+                }
+            )
+        else:
+            first = results[index]
+            others = [results[item]["name"] for item in diagnosis["divergent"][1:]]
+            extra = (
+                f" {_place(others)} também {'divergem' if len(others) > 1 else 'diverge'}; trate {name} "
+                "primeiro, porque um problema no início da rota se repete nas caixas seguintes."
+                if others
+                else ""
+            )
+            recommendations.append(
+                {
+                    "level": "required",
+                    "title": f"{prefix}Sinal real divergente a partir de {name}",
+                    "body": (
+                        f"Melhor cliente com {first['measured']:.2f} dBm, projetado {first['local']:.2f} dBm "
+                        f"({_signed(first['measuredDelta'])} dB). Revise conectores, fusões, distância "
+                        f"levantada e a ligação dos splitters.{extra}"
+                    ),
+                }
+            )
+    return recommendations
 
 
 def optimize_splitters(points: list[dict[str, Any]], raw_settings: dict[str, Any] | None) -> dict[str, Any]:
@@ -613,6 +703,7 @@ def build_recommendations(
     settings: dict[str, Any],
     results: list[dict[str, Any]],
     field_fault: bool = False,
+    confirmed: bool = False,
 ) -> list[dict[str, str]]:
     """Recomendações do projeto. Com falha em campo, só o que não mascara o defeito."""
     if not results:
@@ -631,6 +722,19 @@ def build_recommendations(
                     f"Pelo cálculo, o ponto mais restritivo teria {score['minimum']:.2f} dB além da margem "
                     "de segurança. Os sinais reais abaixo disso vêm de falha na rede, não do dimensionamento. "
                     "Trate as falhas antes de trocar splitters ou mexer na potência."
+                ),
+            }
+        )
+    elif score["minimum"] < 0 and confirmed:
+        recommendations.append(
+            {
+                "level": "required",
+                "title": "A rede está como projetada: o problema é o projeto",
+                "body": (
+                    "Os sinais reais batem com o cálculo, então não há falha de campo para procurar. "
+                    f"{critical['name']} fica com {critical['local']:.1f} dBm, {abs(score['minimum']):.2f} dB "
+                    "abaixo da margem de segurança. Para resolver, troque desbalanceados (veja o otimizador), "
+                    "confirme a potência real da origem ou reduza os clientes nessa derivação."
                 ),
             }
         )
@@ -758,13 +862,31 @@ def analyze_route(points: list[dict[str, Any]], raw_settings: dict[str, Any] | N
             "totalClients": 0,
         }
 
-    diagnosis = diagnose_measurements(points, settings, results)
+    readings = check_readings(results, settings)
+    # Leituras impossíveis não entram no diagnóstico: distorceriam a rota inteira
+    clean_points, clean_results = points, results
+    if any(item["impossible"] for item in readings):
+        clean_points = deepcopy(points)
+        for item in readings:
+            if item["impossible"]:
+                clean_points[item["index"]]["measured"] = None
+        clean_results = calculate_route(clean_points, settings)
+    diagnosis = diagnose_measurements(clean_points, settings, clean_results)
+    diagnosis["readings"] = readings
+    impossible = {item["index"] for item in readings if item["impossible"]}
+    overloads = {item["index"] for item in readings if item["overload"]}
     attenuations = {item["index"]: item["loss"] for item in diagnosis["attenuations"]}
     wrong_splitters = {item["index"]: item["likely"] for item in diagnosis["wrongSplitters"]}
     for index, item in enumerate(results):
         item["suspectedInversion"] = index in diagnosis["inversions"]
         item["suspectedAttenuation"] = attenuations.get(index)
         item["suspectedSplitter"] = wrong_splitters.get(index)
+        item["impossibleReading"] = index in impossible
+        item["overload"] = index in overloads
+    measured_count = sum(item["measured"] is not None for item in clean_results)
+    confirmed = measured_count >= 2 and not diagnosis["divergent"]
+    if confirmed and summary["status"] == "Revisão necessária":
+        summary["statusCopy"] = "Os sinais reais confirmam: a rota não fecha no projeto"
     if diagnosis["divergent"]:
         causes = []
         if diagnosis["attenuations"]:
@@ -779,9 +901,25 @@ def analyze_route(points: list[dict[str, Any]], raw_settings: dict[str, Any] | N
             if causes
             else "Os sinais reais não batem com o projeto"
         )
-    field_steps = measurement_recommendations(points, settings, results, diagnosis)
-    recommendations = field_steps + build_recommendations(
-        points, settings, results, field_fault=bool(diagnosis["divergent"])
+    field_steps = measurement_recommendations(clean_points, settings, clean_results, diagnosis)
+    source_estimate = estimate_source(settings, clean_results, diagnosis)
+    estimate_step = []
+    if source_estimate:
+        estimate_step.append(
+            {
+                "level": "informative",
+                "title": f"Potência da origem estimada: {source_estimate['value']:.1f} dBm",
+                "body": (
+                    f"Pelos sinais reais de {source_estimate['samples']} caixas, a origem deve estar saindo "
+                    f"cerca de {source_estimate['value']:.1f} dBm, e não {settings['sourcePower']:.1f} dBm "
+                    "como informado. Se você não mediu a saída do DIO, use o valor estimado para o "
+                    "diagnóstico e o otimizador ficarem mais precisos."
+                ),
+                "action": {"label": f"Usar {source_estimate['value']:.1f} dBm", "sourcePower": source_estimate["value"]},
+            }
+        )
+    recommendations = field_steps + estimate_step + build_recommendations(
+        points, settings, results, field_fault=bool(diagnosis["divergent"]), confirmed=confirmed
     )
     diagnosis.pop("scenario", None)
     return {
@@ -790,6 +928,7 @@ def analyze_route(points: list[dict[str, Any]], raw_settings: dict[str, Any] | N
         "summary": summary,
         "diagnosis": diagnosis,
         "fieldSteps": field_steps,
+        "sourceEstimate": source_estimate,
         "recommendations": recommendations,
     }
 
@@ -833,6 +972,10 @@ def build_field_report(
             flags += " ⚠ saídas invertidas?"
         if item.get("suspectedSplitter"):
             flags += f" ⚠ desbalanceado pode ser {item['suspectedSplitter']}"
+        if item.get("impossibleReading"):
+            flags += " ⚠ leitura impossível"
+        elif item.get("overload"):
+            flags += " ⚠ sinal forte demais"
         lines.append(
             f"{number}. {item['name']} ({' + '.join(part for part in parts if part)}): "
             f"{item['local']:.2f} dBm · {real}{flags}"
@@ -843,6 +986,8 @@ def build_field_report(
         f"Origem {settings['sourcePower']:.1f} dBm · limite {settings['minimumPower']:.1f} dBm · "
         f"margem {settings['safetyMargin']:.1f} dB",
     ]
+    if analysis["sourceEstimate"]:
+        lines.append(f"Origem estimada pelos sinais reais: {analysis['sourceEstimate']['value']:.1f} dBm")
     return {"text": "\n".join(lines)}
 
 
