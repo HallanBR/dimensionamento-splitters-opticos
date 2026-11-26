@@ -21,7 +21,7 @@ A versão hospedada executa o motor Python diretamente no navegador por WebAssem
 - cálculo da potência estimada por ponto;
 - compartilhamento do cenário completo por link comprimido, sem banco de dados (links antigos continuam abrindo);
 - edição direta na linha de cada caixa, inserção de caixas no meio da rota e exclusão com opção de desfazer;
-- sinal real do melhor cliente de cada caixa, com diferença para o projetado e diagnóstico de atenuação em trecho e de saídas de desbalanceado invertidas, em passos na ordem da rota;
+- sinal real do melhor cliente de cada caixa, com diferença para o projetado e diagnóstico de atenuação em trecho, de saídas de desbalanceado invertidas e de desbalanceado instalado diferente do cadastro, em passos na ordem da rota;
 - relatório de campo pronto para copiar ou enviar pelo WhatsApp, com os passos, os sinais por caixa e os parâmetros usados;
 - gráfico da potência projetada e do sinal real ao longo da rota;
 - ferramentas de projeto em um menu à parte: otimizador de desbalanceados (só altera a rota quando a sugestão é aplicada) e consulta rápida de atenuação;
