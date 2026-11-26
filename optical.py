@@ -232,6 +232,9 @@ HYPOTHESIS_MIN_GAIN = 2.0
 HYPOTHESIS_MAX_RESIDUAL = 2.5
 ATTENUATION_MIN = 2.0
 MAX_HYPOTHESES = 4
+WRONG_SPLITTER_TOLERANCE = 2.0
+# Com seis modelos possíveis por caixa, o cadastro errado explica quase tudo; só vence com folga
+WRONG_SPLITTER_PENALTY = 3.0
 
 
 def _residuals(points: list[dict[str, Any]], settings: dict[str, Any]) -> list[float | None]:
@@ -258,13 +261,15 @@ def diagnose_measurements(
 ) -> dict[str, Any]:
     """Compara o sinal real do melhor cliente de cada caixa com o projeto e procura a causa.
 
-    Duas hipóteses de falha são combinadas: atenuação no trecho que chega a uma caixa
-    (afeta ela e todas as seguintes) e saídas do desbalanceado ligadas trocadas. A busca
-    é gulosa: a cada rodada testa cada hipótese em cada caixa, reajusta o valor das
-    atenuações e mantém a que mais aproxima o projeto dos sinais reais. Em empate vence
-    a caixa mais próxima da origem, porque o tratamento em campo segue do início ao fim.
-    O conjunto só é aceito se explicar os sinais reais com no máximo
-    HYPOTHESIS_MAX_RESIDUAL dB, tolerando uma caixa com problema local.
+    Três hipóteses de falha são combinadas: atenuação no trecho que chega a uma caixa
+    (afeta ela e todas as seguintes), saídas do desbalanceado ligadas trocadas e
+    desbalanceado instalado diferente do cadastrado. A busca é gulosa: a cada rodada testa
+    cada hipótese em cada caixa, reajusta o valor das atenuações e mantém a que mais
+    aproxima o projeto dos sinais reais. Em empate vence a caixa mais próxima da origem,
+    porque o tratamento em campo segue do início ao fim, e entre hipóteses da mesma caixa
+    vence a de falha física antes da de cadastro. O conjunto só é aceito se explicar os
+    sinais reais com no máximo HYPOTHESIS_MAX_RESIDUAL dB, tolerando uma caixa com
+    problema local.
     """
     divergent = [
         index
@@ -275,6 +280,7 @@ def diagnose_measurements(
         "divergent": divergent,
         "attenuations": [],
         "inversions": [],
+        "wrongSplitters": [],
         "localIssues": [],
         "residual": None,
     }
@@ -286,32 +292,53 @@ def diagnose_measurements(
     current_error = _error(_residuals(scenario, settings))
     attenuations: list[int] = []
     inversions: list[int] = []
+    wrong_splitters: list[int] = []
+
+    def candidates(index: int, point: dict[str, Any]) -> list[tuple[str, str | None]]:
+        options: list[tuple[str, str | None]] = []
+        # Com um só sinal real depois do trecho não dá para separar atenuação de problema local
+        if index not in attenuations and sum(measured[index:]) >= 2:
+            options.append(("attenuation", None))
+        if not point.get("splitter"):
+            return options
+        if index not in inversions:
+            options.append(("inversion", None))
+        # Trocar o desbalanceado muda a caixa e as seguintes: sem sinal real nas duas, vira problema local
+        if index not in wrong_splitters and measured[index] and any(measured[index + 1:]):
+            options += [
+                ("splitter", splitter.ratio) for splitter in SPLITTERS if splitter.ratio != points[index]["splitter"]
+            ]
+        return options
+
+    def trial_for(kind: str, index: int, ratio: str | None) -> list[dict[str, Any]] | None:
+        trial = deepcopy(scenario)
+        trial_attenuations = attenuations + [index] if kind == "attenuation" else attenuations
+        if kind == "inversion":
+            trial[index]["inverted"] = True
+        elif kind == "splitter":
+            trial[index]["splitter"] = ratio
+        _fit_attenuations(trial, settings, trial_attenuations)
+        if any(trial[item]["extraLoss"] < ATTENUATION_MIN for item in trial_attenuations):
+            return None
+        return trial
+
     for _ in range(MAX_HYPOTHESES):
         best: tuple[float, str, int, list[dict[str, Any]]] | None = None
         for index, point in enumerate(scenario):
-            for kind in ("attenuation", "inversion"):
-                if kind == "attenuation":
-                    # Com um só sinal real depois do trecho não dá para separar atenuação de problema local
-                    if index in attenuations or sum(measured[index:]) < 2:
-                        continue
-                elif index in inversions or not point.get("splitter"):
+            for kind, ratio in candidates(index, point):
+                trial = trial_for(kind, index, ratio)
+                if trial is None:
                     continue
-                trial = deepcopy(scenario)
-                trial_attenuations = attenuations + [index] if kind == "attenuation" else attenuations
-                if kind == "inversion":
-                    trial[index]["inverted"] = True
-                _fit_attenuations(trial, settings, trial_attenuations)
-                if any(trial[item]["extraLoss"] < ATTENUATION_MIN for item in trial_attenuations):
-                    continue
-                error = _error(_residuals(trial, settings))
+                penalties = len(wrong_splitters) + (kind == "splitter")
+                error = _error(_residuals(trial, settings)) + WRONG_SPLITTER_PENALTY * penalties
                 if best is None or error < best[0] - 1e-9:
                     best = (error, kind, index, trial)
         if best is None or best[0] > current_error - HYPOTHESIS_MIN_GAIN:
             break
         current_error, kind, index, scenario = best
-        (attenuations if kind == "attenuation" else inversions).append(index)
+        {"attenuation": attenuations, "inversion": inversions, "splitter": wrong_splitters}[kind].append(index)
 
-    if not attenuations and not inversions:
+    if not attenuations and not inversions and not wrong_splitters:
         return diagnosis
     residuals = _residuals(scenario, settings)
     unexplained = [
@@ -325,6 +352,29 @@ def diagnose_measurements(
         {"index": index, "loss": scenario[index]["extraLoss"]} for index in sorted(attenuations)
     ]
     diagnosis["inversions"] = sorted(inversions)
+    for index in sorted(wrong_splitters):
+        # Outros modelos que explicam os sinais quase tão bem entram como alternativas
+        fits = []
+        for splitter in SPLITTERS:
+            if splitter.ratio == points[index]["splitter"]:
+                continue
+            trial = deepcopy(scenario)
+            trial[index]["splitter"] = splitter.ratio
+            _fit_attenuations(trial, settings, attenuations)
+            fits.append((_error(_residuals(trial, settings)), splitter.ratio))
+        best_error = min(error for error, _ in fits)
+        diagnosis["wrongSplitters"].append(
+            {
+                "index": index,
+                "registered": points[index]["splitter"],
+                "likely": scenario[index]["splitter"],
+                "alternatives": [
+                    ratio
+                    for error, ratio in sorted(fits)
+                    if ratio != scenario[index]["splitter"] and error <= best_error + WRONG_SPLITTER_TOLERANCE
+                ],
+            }
+        )
     diagnosis["localIssues"] = [
         {"index": index, "delta": residuals[index]}
         for index in unexplained
@@ -349,10 +399,12 @@ def measurement_recommendations(
     faults = (
         [("attenuation", item["index"], item) for item in diagnosis["attenuations"]]
         + [("inversion", index, None) for index in diagnosis["inversions"]]
+        + [("splitter", item["index"], item) for item in diagnosis["wrongSplitters"]]
         + [("local", item["index"], item) for item in diagnosis["localIssues"]]
     )
     if faults:
-        faults.sort(key=lambda fault: (fault[1], ["attenuation", "inversion", "local"].index(fault[0])))
+        order = ["attenuation", "inversion", "splitter", "local"]
+        faults.sort(key=lambda fault: (fault[1], order.index(fault[0])))
         scenario = diagnosis["scenario"]
         fitted = calculate_route(scenario, settings)
         recommendations = []
@@ -413,6 +465,29 @@ def measurement_recommendations(
                         "level": "required",
                         "title": f"{prefix}Possível inversão das saídas do {item['splitter']} em {name}",
                         "body": body,
+                    }
+                )
+            elif kind == "splitter":
+                input_power = fitted[index]["input"]
+                registered, likely = get_splitter(data["registered"]), get_splitter(data["likely"])
+                options = f"um {data['likely']}" + (
+                    f" (ou {' ou '.join(data['alternatives'])})" if data["alternatives"] else ""
+                )
+                recommendations.append(
+                    {
+                        "level": "required",
+                        "title": f"{prefix}O desbalanceado de {name} pode não ser {data['registered']}",
+                        "body": (
+                            f"Com {data['registered']}, os sinais de {name} e das caixas seguintes não fecham. "
+                            f"Com {options} no lugar, a rota inteira é explicada. Com cerca de "
+                            f"{input_power:.1f} dBm na entrada, meça as duas saídas: um {data['registered']} dá "
+                            f"{input_power - registered.local_loss:.1f} dBm na porta de clientes e "
+                            f"{input_power - registered.pass_loss:.1f} dBm na continuidade; um {data['likely']} dá "
+                            f"{input_power - likely.local_loss:.1f} e {input_power - likely.pass_loss:.1f} dBm. "
+                            "Se confirmar, corrija o cadastro antes de usar o otimizador. Se as saídas baterem "
+                            f"com {data['registered']}, o problema está no splitter de clientes ou nos "
+                            "conectores desta caixa."
+                        ),
                     }
                 )
             else:
@@ -685,18 +760,22 @@ def analyze_route(points: list[dict[str, Any]], raw_settings: dict[str, Any] | N
 
     diagnosis = diagnose_measurements(points, settings, results)
     attenuations = {item["index"]: item["loss"] for item in diagnosis["attenuations"]}
+    wrong_splitters = {item["index"]: item["likely"] for item in diagnosis["wrongSplitters"]}
     for index, item in enumerate(results):
         item["suspectedInversion"] = index in diagnosis["inversions"]
         item["suspectedAttenuation"] = attenuations.get(index)
+        item["suspectedSplitter"] = wrong_splitters.get(index)
     if diagnosis["divergent"]:
         causes = []
         if diagnosis["attenuations"]:
             causes.append("atenuação no trecho")
         if diagnosis["inversions"]:
             causes.append("saídas invertidas")
+        if diagnosis["wrongSplitters"]:
+            causes.append("desbalanceado diferente do cadastro")
         summary["status"] = "Sinal real divergente"
         summary["statusCopy"] = (
-            f"Os sinais reais indicam {' e '.join(causes)}"
+            f"Os sinais reais indicam {_place(causes)}"
             if causes
             else "Os sinais reais não batem com o projeto"
         )
@@ -752,6 +831,8 @@ def build_field_report(
             flags += f" ⚠ atenuação antes (~{item['suspectedAttenuation']:.1f} dB)"
         if item.get("suspectedInversion"):
             flags += " ⚠ saídas invertidas?"
+        if item.get("suspectedSplitter"):
+            flags += f" ⚠ desbalanceado pode ser {item['suspectedSplitter']}"
         lines.append(
             f"{number}. {item['name']} ({' + '.join(part for part in parts if part)}): "
             f"{item['local']:.2f} dBm · {real}{flags}"

@@ -243,6 +243,65 @@ class CascadeDiagnosisTests(unittest.TestCase):
         self.assertIn("a partir de SJL-CTO0381", analysis["recommendations"][0]["title"])
 
 
+VPN_SETTINGS = {**SETTINGS, "sourcePower": 5.5}
+
+
+def vpn_route(*measured: float | None) -> list[dict]:
+    """Rota real da VPN: 0407 → 0399, com a 0402 cadastrada como 50/50."""
+    boxes = [
+        ("VPN-CTO0407", "05/95", "1x16"),
+        ("VPN-CTO0406", "05/95", "1x8"),
+        ("VPN-CTO0405", "05/95", "1x16"),
+        ("VPN-CTO0404", "05/95", "1x8"),
+        ("VPN-CTO0403", "05/95", "1x8"),
+        ("VPN-CTO0402", "50/50", "1x8"),
+        ("VPN-CTO0401", "15/85", "1x8"),
+        ("VPN-CTO0400", "50/50", "1x16"),
+        ("VPN-CTO0399", "", "1x8"),
+    ]
+    return [
+        {"name": name, "distance": 0, "splices": 0, "splitter": ratio, "balanced": balanced, "measured": value}
+        for (name, ratio, balanced), value in zip(boxes, measured)
+    ]
+
+
+VPN_MEASURED = (-22.4, -22.3, -27.7, -24.3, -25.2, -23, -23.8, -21.2, -20.1)
+
+
+class WrongSplitterTests(unittest.TestCase):
+    def test_atenuacao_e_desbalanceado_diferente_do_cadastro(self) -> None:
+        analysis = analyze_route(vpn_route(*VPN_MEASURED), VPN_SETTINGS)
+        diagnosis = analysis["diagnosis"]
+        self.assertEqual([item["index"] for item in diagnosis["attenuations"]], [1])
+        self.assertEqual(len(diagnosis["wrongSplitters"]), 1)
+        wrong = diagnosis["wrongSplitters"][0]
+        self.assertEqual((wrong["index"], wrong["registered"]), (5, "50/50"))
+        self.assertIn(wrong["likely"], {"10/90", "15/85", "20/80"})
+        self.assertEqual(diagnosis["localIssues"], [])
+        first, second = analysis["recommendations"][:2]
+        self.assertIn("1º passo: Atenuação", first["title"])
+        self.assertIn("entre VPN-CTO0407 e VPN-CTO0406", first["title"])
+        self.assertEqual(second["title"], "2º passo: O desbalanceado de VPN-CTO0402 pode não ser 50/50")
+        self.assertIn("corrija o cadastro antes de usar o otimizador", second["body"])
+        self.assertEqual(analysis["results"][5]["suspectedSplitter"], wrong["likely"])
+        self.assertIn("desbalanceado diferente do cadastro", analysis["summary"]["statusCopy"])
+
+    def test_relatorio_marca_o_desbalanceado_suspeito(self) -> None:
+        report = build_field_report(vpn_route(*VPN_MEASURED), VPN_SETTINGS)["text"]
+        self.assertIn("VPN-CTO0402 (50/50 + 1x8)", report)
+        self.assertIn("⚠ desbalanceado pode ser", report)
+
+    def test_inversao_continua_preferida_ao_cadastro_errado(self) -> None:
+        analysis = analyze_route(cascade_route(-19.73, -24, -23, -23, -21), CASCADE_SETTINGS)
+        self.assertEqual(analysis["diagnosis"]["inversions"], [3])
+        self.assertEqual(analysis["diagnosis"]["wrongSplitters"], [])
+
+    def test_sem_sinal_nas_caixas_seguintes_nao_acusa_cadastro(self) -> None:
+        measured = list(VPN_MEASURED[:6]) + [None, None, None]
+        analysis = analyze_route(vpn_route(*measured), VPN_SETTINGS)
+        self.assertEqual(analysis["diagnosis"]["wrongSplitters"], [])
+
+
 class OptimizerTests(unittest.TestCase):
     def test_otimizador_melhora_a_menor_margem(self) -> None:
         result = optimize_splitters(field_route(), FIELD_SETTINGS)

@@ -379,6 +379,7 @@ function renderPoints() {
                 <input class="name-input" data-field="name" value="${escapeHtml(point.name)}" placeholder="Nome da caixa" aria-label="Nome da caixa ${index + 1}">
                 <span class="inversion-flag" data-output="attenuation" hidden>Atenuação antes?</span>
                 <span class="inversion-flag" data-output="inversion" hidden>Saídas invertidas?</span>
+                <span class="inversion-flag" data-output="wrong-splitter" hidden></span>
               </div>
               <label class="splitter-core">
                 <span data-output="splitter-label">${point.splitter ? "Desbalanceado" : "Final da rota"}</span>
@@ -550,7 +551,13 @@ function patchRouteOutputs(results) {
     attenuation.hidden = suspectedAttenuation === null;
     if (suspectedAttenuation !== null) attenuation.textContent = `Atenuação antes? ~${suspectedAttenuation.toFixed(1)} dB`;
     node.querySelector('[data-output="inversion"]').hidden = !result.suspectedInversion;
-    node.classList.toggle("is-suspect", Boolean(result.suspectedInversion) || suspectedAttenuation !== null);
+    const wrongSplitter = node.querySelector('[data-output="wrong-splitter"]');
+    wrongSplitter.hidden = !result.suspectedSplitter;
+    if (result.suspectedSplitter) wrongSplitter.textContent = `Desbalanceado é ${result.suspectedSplitter}?`;
+    node.classList.toggle(
+      "is-suspect",
+      Boolean(result.suspectedInversion) || Boolean(result.suspectedSplitter) || suspectedAttenuation !== null,
+    );
   });
 }
 
